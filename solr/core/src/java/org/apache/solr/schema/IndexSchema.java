@@ -50,6 +50,7 @@ import org.apache.solr.core.SolrResourceLoader;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.response.SchemaXmlWriter;
 import org.apache.solr.response.SolrQueryResponse;
+import org.apache.solr.schema.SchemaFieldInfo.SchemaInfoSupplier;
 import org.apache.solr.search.similarities.ClassicSimilarityFactory;
 import org.apache.solr.search.similarities.SchemaSimilarityFactory;
 import org.apache.solr.util.DOMUtil;
@@ -62,6 +63,8 @@ import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
+
+import com.google.common.collect.Iterators;
 
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
@@ -474,7 +477,7 @@ public class IndexSchema {
       typeLoader.load(loader, nodes);
 
       // load the fields
-      Map<String,Boolean> explicitRequiredProp = loadFields(document, xpath);
+      Map<String,Boolean> explicitRequiredProp = loadFields(document, xpath, schemaConf);
 
       expression = stepsToPath(SCHEMA, SIMILARITY); //   /schema/similarity
       Node node = (Node) xpath.evaluate(expression, document, XPathConstants.NODE);
@@ -600,7 +603,7 @@ public class IndexSchema {
    * 
    * @return a map from field name to explicit required value  
    */ 
-  protected synchronized Map<String,Boolean> loadFields(Document document, XPath xpath) throws XPathExpressionException {
+  protected synchronized Map<String,Boolean> loadFields(Document document, XPath xpath, Config schemaConf) throws XPathExpressionException {
     // Hang on to the fields that say if they are required -- this lets us set a reasonable default for the unique key
     Map<String,Boolean> explicitRequiredProp = new HashMap<>();
     
@@ -614,29 +617,35 @@ public class IndexSchema {
 
     NodeList nodes = (NodeList)xpath.evaluate(expression, document, XPathConstants.NODESET);
 
-    for (int i=0; i<nodes.getLength(); i++) {
-      Node node = nodes.item(i);
-
-      NamedNodeMap attrs = node.getAttributes();
-
-      String name = DOMUtil.getAttr(attrs, NAME, "field definition");
-      log.trace("reading field def "+name);
-      String type = DOMUtil.getAttr(attrs, TYPE, "field " + name);
-
-      FieldType ft = fieldTypes.get(type);
-      if (ft==null) {
-        throw new SolrException
-            (ErrorCode.BAD_REQUEST, "Unknown " + FIELD_TYPE + " '" + type + "' specified on field " + name);
+    Iterator<SchemaFieldInfo> iter = readSchemaFields(nodes);
+    
+    // Field Supplier, we introduce the SchemaInfoSupplier interface to be able to populate the index
+    // fields from the voyager DexField class
+    SchemaInfoSupplier supplier = null;
+    String supperClass = schemaConf.get("/schema/supplier/@class", null);
+    if(supperClass!=null) {
+      log.info("Loading Fields From: "+supperClass);
+      supplier = loader.newInstance(supperClass, SchemaInfoSupplier.class);
+      iter = Iterators.concat( iter, supplier.getFields(this) );
+    }
+    
+    while(iter.hasNext()) {
+      SchemaFieldInfo info = iter.next();
+      String name = info.name;  // make sure we are not overrideing the base name
+      log.trace("loading: {}", info.name );
+      
+      FieldType ft = fieldTypes.get(info.type);
+       if (ft==null) {
+         throw new SolrException
+            (ErrorCode.BAD_REQUEST, "Unknown " + FIELD_TYPE + " '" + info.type + "' specified on field " + info.name);
+      }
+       
+      SchemaField f = SchemaField.create(info.name,ft,info.props);
+      if (null != info.props.get(REQUIRED)) {
+        explicitRequiredProp.put(info.name, Boolean.valueOf(info.props.get(REQUIRED)));
       }
 
-      Map<String,String> args = DOMUtil.toMapExcept(attrs, NAME, TYPE);
-      if (null != args.get(REQUIRED)) {
-        explicitRequiredProp.put(name, Boolean.valueOf(args.get(REQUIRED)));
-      }
-
-      SchemaField f = SchemaField.create(name,ft,args);
-
-      if (node.getNodeName().equals(FIELD)) {
+      if(!info.dynamic) {
         SchemaField old = fields.put(f.getName(),f);
         if( old != null ) {
           String msg = "[schema.xml] Duplicate field definition for '"
@@ -652,13 +661,24 @@ public class IndexSchema {
           log.debug(name+" is required in this schema");
           requiredFields.add(f);
         }
-      } else if (node.getNodeName().equals(DYNAMIC_FIELD)) {
-        if (isValidDynamicField(dFields, f)) {
-          addDynamicFieldNoDupCheck(dFields, f);
+      }
+      else {  // dynamic field
+        if( f.getDefaultValue() != null ) {
+          throw new SolrException(ErrorCode.SERVER_ERROR,
+                                  DYNAMIC_FIELD + " can not have a default value: " + name);
         }
-      } else {
-        // we should never get here
-        throw new RuntimeException("Unknown field type");
+        if ( f.isRequired() ) {
+          throw new SolrException(ErrorCode.SERVER_ERROR,
+                                  DYNAMIC_FIELD + " can not be required: " + name);
+        }
+        if (isValidFieldGlob(name)) {
+          // make sure nothing else has the same path
+          addDynamicField(dFields, f);
+        } else {
+          String msg = "Dynamic field name '" + name 
+              + "' should have either a leading or a trailing asterisk, and no others.";
+          throw new SolrException(ErrorCode.SERVER_ERROR, msg);
+        }
       }
     }
 
@@ -668,9 +688,53 @@ public class IndexSchema {
     requiredFields.addAll(fieldsWithDefaultValue);
 
     dynamicFields = dynamicFieldListToSortedArray(dFields);
-                                                                   
+    
+    if(supplier!=null) {
+      supplier.postInit(this);
+    }
     return explicitRequiredProp;
   }
+  
+
+  private Iterator<SchemaFieldInfo> readSchemaFields(final NodeList nodes)
+  {
+    return new Iterator<SchemaFieldInfo>() {
+      int index = 0;
+ 
+      @Override
+      public boolean hasNext() {
+        return index<nodes.getLength();
+      }
+
+      @Override
+      public SchemaFieldInfo next() {
+        Node node = nodes.item(index++);
+        NamedNodeMap attrs = node.getAttributes();
+        SchemaFieldInfo f = new SchemaFieldInfo();
+        
+        f.name = DOMUtil.getAttr(attrs, NAME, "field definition");
+        log.trace("reading field def: "+f.name);
+        f.type = DOMUtil.getAttr(attrs, TYPE, "field " + f.name);
+        f.props = DOMUtil.toMapExcept(attrs, NAME, TYPE);
+
+        if (node.getNodeName().equals(FIELD)) {
+          //OK
+        } else if (node.getNodeName().equals(DYNAMIC_FIELD)) {
+          f.dynamic = true;
+        } else {
+          // we should never get here
+          throw new RuntimeException("Unknown field type");
+        }
+        return f;
+      }
+
+      @Override
+      public void remove() {
+        throw new UnsupportedOperationException();
+      }
+    };
+  }
+  
   
   /**
    * Sort the dynamic fields and stuff them in a normal array for faster access.
@@ -750,6 +814,15 @@ public class IndexSchema {
       if (1 == count) return true;
     }
     return false;
+  }
+
+  private void addDynamicField(List<DynamicField> dFields, SchemaField f) {
+    if (isDuplicateDynField(dFields, f)) {
+      String msg = "[schema.xml] Duplicate DynamicField definition for '" + f.getName() + "'";
+      throw new SolrException(ErrorCode.SERVER_ERROR, msg);
+    } else {
+      addDynamicFieldNoDupCheck(dFields, f);
+    }
   }
   
   protected boolean isValidDynamicField(List<DynamicField> dFields, SchemaField f) {
