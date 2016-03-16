@@ -81,7 +81,6 @@ public class TestGeoJSONResponseWriter extends SolrTestCaseJ4 {
 
   protected Map<String,Object> readJSON(String json) {
     try {
-      //System.out.println( json );
       return jsonmapper.readValue(json, Map.class);
     }
     catch(Exception ex) {
@@ -143,7 +142,6 @@ public class TestGeoJSONResponseWriter extends SolrTestCaseJ4 {
         "indent","true"));
     
     // Check that we have a normal solr response with 'responseHeader' and 'response'
-    //System.out.println( json );
     Map<String,Object> rsp = readJSON(json);
     assertNotNull(rsp.get("responseHeader"));
     assertNotNull(rsp.get("response"));
@@ -158,7 +156,6 @@ public class TestGeoJSONResponseWriter extends SolrTestCaseJ4 {
         "indent","true"));
     
     // Check that we have a normal solr response with 'responseHeader' and 'response'
-    // System.out.println( json );
     rsp = readJSON(json);
     assertNull(rsp.get("responseHeader"));
     assertNull(rsp.get("response"));
