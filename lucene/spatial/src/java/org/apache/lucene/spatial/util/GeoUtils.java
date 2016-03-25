@@ -16,8 +16,6 @@
  */
 package org.apache.lucene.spatial.util;
 
-import java.util.ArrayList;
-
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.PI;
@@ -25,16 +23,9 @@ import static java.lang.Math.abs;
 
 import static org.apache.lucene.util.SloppyMath.asin;
 import static org.apache.lucene.util.SloppyMath.cos;
-import static org.apache.lucene.util.SloppyMath.sin;
 import static org.apache.lucene.util.SloppyMath.TO_DEGREES;
 import static org.apache.lucene.util.SloppyMath.TO_RADIANS;
 import static org.apache.lucene.spatial.util.GeoEncodingUtils.TOLERANCE;
-import static org.apache.lucene.spatial.util.GeoProjectionUtils.MAX_LAT_RADIANS;
-import static org.apache.lucene.spatial.util.GeoProjectionUtils.MAX_LON_RADIANS;
-import static org.apache.lucene.spatial.util.GeoProjectionUtils.MIN_LAT_RADIANS;
-import static org.apache.lucene.spatial.util.GeoProjectionUtils.MIN_LON_RADIANS;
-import static org.apache.lucene.spatial.util.GeoProjectionUtils.pointFromLonLatBearingGreatCircle;
-import static org.apache.lucene.spatial.util.GeoProjectionUtils.SEMIMAJOR_AXIS;
 
 /**
  * Basic reusable geo-spatial utility methods
@@ -53,6 +44,19 @@ public final class GeoUtils {
 
   /** Maximum latitude value. */
   public static final double MAX_LAT_INCL = 90.0D;
+  
+  /** min longitude value in radians */
+  public static final double MIN_LON_RADIANS = TO_RADIANS * MIN_LON_INCL;
+  /** min latitude value in radians */
+  public static final double MIN_LAT_RADIANS = TO_RADIANS * MIN_LAT_INCL;
+  /** max longitude value in radians */
+  public static final double MAX_LON_RADIANS = TO_RADIANS * MAX_LON_INCL;
+  /** max latitude value in radians */
+  public static final double MAX_LAT_RADIANS = TO_RADIANS * MAX_LAT_INCL;
+  
+  // WGS84 earth-ellipsoid parameters
+  /** major (a) axis in meters */
+  public static final double SEMIMAJOR_AXIS = 6_378_137; // [m]
 
   // No instance:
   private GeoUtils() {
@@ -68,66 +72,8 @@ public final class GeoUtils {
     return Double.isNaN(lon) == false && lon >= MIN_LON_INCL && lon <= MAX_LON_INCL;
   }
 
-  /** Puts longitude in range of -180 to +180. */
-  public static double normalizeLon(double lon_deg) {
-    if (lon_deg >= -180 && lon_deg <= 180) {
-      return lon_deg; //common case, and avoids slight double precision shifting
-    }
-    double off = (lon_deg + 180) % 360;
-    if (off < 0) {
-      return 180 + off;
-    } else if (off == 0 && lon_deg > 0) {
-      return 180;
-    } else {
-      return -180 + off;
-    }
-  }
-
-  /** Puts latitude in range of -90 to 90. */
-  public static double normalizeLat(double lat_deg) {
-    if (lat_deg >= -90 && lat_deg <= 90) {
-      return lat_deg; //common case, and avoids slight double precision shifting
-    }
-    double off = abs((lat_deg + 90) % 360);
-    return (off <= 180 ? off : 360-off) - 90;
-  }
-
-  /**
-   * Converts a given circle (defined as a point/radius) to an approximated line-segment polygon
-   *
-   * @param lon          longitudinal center of circle (in degrees)
-   * @param lat          latitudinal center of circle (in degrees)
-   * @param radiusMeters distance radius of circle (in meters)
-   * @return a list of lon/lat points representing the circle
-   */
-  @SuppressWarnings({"unchecked", "rawtypes"})
-  public static ArrayList<double[]> circleToPoly(final double lon, final double lat, final double radiusMeters) {
-    double angle;
-    // a little under-sampling (to limit the number of polygonal points): using archimedes estimation of pi
-    final int sides = 25;
-    ArrayList<double[]> geometry = new ArrayList();
-    double[] lons = new double[sides];
-    double[] lats = new double[sides];
-
-    double[] pt = new double[2];
-    final int sidesLen = sides - 1;
-    for (int i = 0; i < sidesLen; ++i) {
-      angle = (i * 360 / sides);
-      pt = pointFromLonLatBearingGreatCircle(lon, lat, angle, radiusMeters, pt);
-      lons[i] = pt[0];
-      lats[i] = pt[1];
-    }
-    // close the poly
-    lons[sidesLen] = lons[0];
-    lats[sidesLen] = lats[0];
-    geometry.add(lons);
-    geometry.add(lats);
-
-    return geometry;
-  }
-
   /** Compute Bounding Box for a circle using WGS-84 parameters */
-  public static GeoRect circleToBBox(final double centerLon, final double centerLat, final double radiusMeters) {
+  public static GeoRect circleToBBox(final double centerLat, final double centerLon, final double radiusMeters) {
     final double radLat = TO_RADIANS * centerLat;
     final double radLon = TO_RADIANS * centerLon;
     double radDistance = radiusMeters / SEMIMAJOR_AXIS;
@@ -137,7 +83,7 @@ public final class GeoUtils {
     double maxLon;
 
     if (minLat > MIN_LAT_RADIANS && maxLat < MAX_LAT_RADIANS) {
-      double deltaLon = asin(sin(radDistance) / cos(radLat));
+      double deltaLon = asin(sloppySin(radDistance) / cos(radLat));
       minLon = radLon - deltaLon;
       if (minLon < MIN_LON_RADIANS) {
         minLon += 2d * PI;
@@ -154,13 +100,13 @@ public final class GeoUtils {
       maxLon = MAX_LON_RADIANS;
     }
 
-    return new GeoRect(TO_DEGREES * minLon, TO_DEGREES * maxLon, TO_DEGREES * minLat, TO_DEGREES * maxLat);
+    return new GeoRect(TO_DEGREES * minLat, TO_DEGREES * maxLat, TO_DEGREES * minLon, TO_DEGREES * maxLon);
   }
 
   /** Compute Bounding Box for a polygon using WGS-84 parameters */
-  public static GeoRect polyToBBox(double[] polyLons, double[] polyLats) {
-    if (polyLons.length != polyLats.length) {
-      throw new IllegalArgumentException("polyLons and polyLats must be equal length");
+  public static GeoRect polyToBBox(double[] polyLats, double[] polyLons) {
+    if (polyLats.length != polyLons.length) {
+      throw new IllegalArgumentException("polyLats and polyLons must be equal length");
     }
 
     double minLon = Double.POSITIVE_INFINITY;
@@ -169,19 +115,42 @@ public final class GeoUtils {
     double maxLat = Double.NEGATIVE_INFINITY;
 
     for (int i=0;i<polyLats.length;i++) {
-      if (GeoUtils.isValidLon(polyLons[i]) == false) {
-        throw new IllegalArgumentException("invalid polyLons[" + i + "]=" + polyLons[i]);
-      }
       if (GeoUtils.isValidLat(polyLats[i]) == false) {
         throw new IllegalArgumentException("invalid polyLats[" + i + "]=" + polyLats[i]);
       }
-      minLon = min(polyLons[i], minLon);
-      maxLon = max(polyLons[i], maxLon);
+      if (GeoUtils.isValidLon(polyLons[i]) == false) {
+        throw new IllegalArgumentException("invalid polyLons[" + i + "]=" + polyLons[i]);
+      }
       minLat = min(polyLats[i], minLat);
       maxLat = max(polyLats[i], maxLat);
+      minLon = min(polyLons[i], minLon);
+      maxLon = max(polyLons[i], maxLon);
     }
     // expand bounding box by TOLERANCE factor to handle round-off error
-    return new GeoRect(max(minLon - TOLERANCE, MIN_LON_INCL), min(maxLon + TOLERANCE, MAX_LON_INCL),
-        max(minLat - TOLERANCE, MIN_LAT_INCL), min(maxLat + TOLERANCE, MAX_LAT_INCL));
+    return new GeoRect(max(minLat - TOLERANCE, MIN_LAT_INCL), min(maxLat + TOLERANCE, MAX_LAT_INCL),
+                       max(minLon - TOLERANCE, MIN_LON_INCL), min(maxLon + TOLERANCE, MAX_LON_INCL));
   }
+  
+  // some sloppyish stuff, do we really need this to be done in a sloppy way?
+  // unless it is performance sensitive, we should try to remove.
+  private static final double PIO2 = Math.PI / 2D;
+
+  /**
+   * Returns the trigonometric sine of an angle converted as a cos operation.
+   * <p>
+   * Note that this is not quite right... e.g. sin(0) != 0
+   * <p>
+   * Special cases:
+   * <ul>
+   *  <li>If the argument is {@code NaN} or an infinity, then the result is {@code NaN}.
+   * </ul>
+   * @param a an angle, in radians.
+   * @return the sine of the argument.
+   * @see Math#sin(double)
+   */
+  // TODO: deprecate/remove this? at least its no longer public.
+  private static double sloppySin(double a) {
+    return cos(a - PIO2);
+  }
+
 }

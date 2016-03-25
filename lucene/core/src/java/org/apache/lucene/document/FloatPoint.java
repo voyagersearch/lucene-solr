@@ -126,16 +126,6 @@ public final class FloatPoint extends Field {
     return result.toString();
   }
   
-  /** Encode n-dimensional float values into binary encoding */
-  private static byte[][] encode(float value[]) {
-    byte[][] encoded = new byte[value.length][];
-    for (int i = 0; i < value.length; i++) {
-      encoded[i] = new byte[Float.BYTES];
-      encodeDimension(value[i], encoded[i], 0);
-    }
-    return encoded;
-  }
-  
   // public helper methods (e.g. for queries)
   
   /** Encode single float dimension */
@@ -172,7 +162,9 @@ public final class FloatPoint extends Field {
    * {@link #newRangeQuery(String, float[], float[])} instead.
    * <p>
    * You can have half-open ranges (which are in fact &lt;/&le; or &gt;/&ge; queries)
-   * by setting {@code lowerValue = Float.NEGATIVE_INFINITY} or {@code upperValue = Float.POSITIVE_INFINITY}. 
+   * by setting {@code lowerValue = Float.NEGATIVE_INFINITY} or {@code upperValue = Float.POSITIVE_INFINITY}.
+   * <p> Ranges are inclusive. For exclusive ranges, pass {@code Math#nextUp(lowerValue)}
+   * or {@code Math.nextDown(upperValue)}.
    * <p>
    * Range comparisons are consistent with {@link Float#compareTo(Float)}.
    *
@@ -190,7 +182,9 @@ public final class FloatPoint extends Field {
    * Create a range query for n-dimensional float values.
    * <p>
    * You can have half-open ranges (which are in fact &lt;/&le; or &gt;/&ge; queries)
-   * by setting {@code lowerValue[i] = Float.NEGATIVE_INFINITY} or {@code upperValue[i] = Float.POSITIVE_INFINITY}. 
+   * by setting {@code lowerValue[i] = Float.NEGATIVE_INFINITY} or {@code upperValue[i] = Float.POSITIVE_INFINITY}.
+   * <p> Ranges are inclusive. For exclusive ranges, pass {@code Math#nextUp(lowerValue[i])}
+   * or {@code Math.nextDown(upperValue[i])}.
    * <p>
    * Range comparisons are consistent with {@link Float#compareTo(Float)}.
    *
@@ -203,7 +197,7 @@ public final class FloatPoint extends Field {
    */
   public static Query newRangeQuery(String field, float[] lowerValue, float[] upperValue) {
     PointRangeQuery.checkArgs(field, lowerValue, upperValue);
-    return new PointRangeQuery(field, encode(lowerValue), encode(upperValue)) {
+    return new PointRangeQuery(field, pack(lowerValue).bytes, pack(upperValue).bytes, lowerValue.length) {
       @Override
       protected String toString(int dimension, byte[] value) {
         return Float.toString(decodeDimension(value, 0));

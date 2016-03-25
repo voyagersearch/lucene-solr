@@ -16,21 +16,10 @@
  */
 package org.apache.lucene.spatial.util;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.SloppyMath;
 import org.junit.BeforeClass;
-
-import com.carrotsearch.randomizedtesting.generators.RandomInts;
-
-import static org.apache.lucene.spatial.util.GeoDistanceUtils.DISTANCE_PCT_ERR;
 
 /**
  * Tests class for methods in GeoUtils
@@ -56,199 +45,12 @@ public class TestGeoUtils extends LuceneTestCase {
     latRange = 2 * (random().nextDouble() + 0.5);
 
     originLon = GeoUtils.MIN_LON_INCL + lonRange + (GeoUtils.MAX_LON_INCL - GeoUtils.MIN_LON_INCL - 2 * lonRange) * random().nextDouble();
-    originLon = GeoUtils.normalizeLon(originLon);
+    originLon = BaseGeoPointTestCase.normalizeLon(originLon);
     originLat = GeoUtils.MIN_LAT_INCL + latRange + (GeoUtils.MAX_LAT_INCL - GeoUtils.MIN_LAT_INCL - 2 * latRange) * random().nextDouble();
-    originLat = GeoUtils.normalizeLat(originLat);
+    originLat = BaseGeoPointTestCase.normalizeLat(originLat);
 
     if (VERBOSE) {
       System.out.println("TEST: originLon=" + originLon + " lonRange= " + lonRange + " originLat=" + originLat + " latRange=" + latRange);
-    }
-  }
-
-  public void testGeoHash() {
-    int numPoints = atLeast(100);
-    String randomGeoHashString;
-    String mortonGeoHash;
-    long mortonLongFromGHLong, geoHashLong, mortonLongFromGHString;
-    int randomLevel;
-    for (int i = 0; i < numPoints; ++i) {
-      // random point
-      double lat = randomLat(false);
-      double lon = randomLon(false);
-
-      // compute geohash straight from lat/lon and from morton encoded value to ensure they're the same
-      randomGeoHashString = GeoHashUtils.stringEncode(lon, lat, randomLevel = random().nextInt(12 - 1) + 1);
-      mortonGeoHash = GeoHashUtils.stringEncodeFromMortonLong(GeoEncodingUtils.mortonHash(lon, lat), randomLevel);
-      assertEquals(randomGeoHashString, mortonGeoHash);
-
-      // v&v conversion from lat/lon or geohashstring to geohash long and back to geohash string
-      geoHashLong = (random().nextBoolean()) ? GeoHashUtils.longEncode(lon, lat, randomLevel) : GeoHashUtils.longEncode(randomGeoHashString);
-      assertEquals(randomGeoHashString, GeoHashUtils.stringEncode(geoHashLong));
-
-      // v&v conversion from geohash long to morton long
-      mortonLongFromGHString = GeoHashUtils.mortonEncode(randomGeoHashString);
-      mortonLongFromGHLong = GeoHashUtils.mortonEncode(geoHashLong);
-      assertEquals(mortonLongFromGHLong, mortonLongFromGHString);
-
-      // v&v lat/lon from geohash string and geohash long
-      assertEquals(GeoEncodingUtils.mortonUnhashLat(mortonLongFromGHString), GeoEncodingUtils.mortonUnhashLat(mortonLongFromGHLong), 0);
-      assertEquals(GeoEncodingUtils.mortonUnhashLon(mortonLongFromGHString), GeoEncodingUtils.mortonUnhashLon(mortonLongFromGHLong), 0);
-    }
-  }
-
-  /**
-   * Pass condition: lat=42.6, lng=-5.6 should be encoded as "ezs42e44yx96",
-   * lat=57.64911 lng=10.40744 should be encoded as "u4pruydqqvj8"
-   */
-  public void testEncode() {
-    String hash = GeoHashUtils.stringEncode(-5.6, 42.6, 12);
-    assertEquals("ezs42e44yx96", hash);
-
-    hash = GeoHashUtils.stringEncode(10.40744, 57.64911, 12);
-    assertEquals("u4pruydqqvj8", hash);
-  }
-
-  /**
-   * Pass condition: lat=52.3738007, lng=4.8909347 should be encoded and then
-   * decoded within 0.00001 of the original value
-   */
-  public void testDecodePreciseLongitudeLatitude() {
-    final String geohash = GeoHashUtils.stringEncode(4.8909347, 52.3738007);
-    final long hash = GeoHashUtils.mortonEncode(geohash);
-
-    assertEquals(52.3738007, GeoEncodingUtils.mortonUnhashLat(hash), 0.00001D);
-    assertEquals(4.8909347, GeoEncodingUtils.mortonUnhashLon(hash), 0.00001D);
-  }
-
-  /**
-   * Pass condition: lat=84.6, lng=10.5 should be encoded and then decoded
-   * within 0.00001 of the original value
-   */
-  public void testDecodeImpreciseLongitudeLatitude() {
-    final String geohash = GeoHashUtils.stringEncode(10.5, 84.6);
-
-    final long hash = GeoHashUtils.mortonEncode(geohash);
-
-    assertEquals(84.6, GeoEncodingUtils.mortonUnhashLat(hash), 0.00001D);
-    assertEquals(10.5, GeoEncodingUtils.mortonUnhashLon(hash), 0.00001D);
-  }
-
-  public void testDecodeEncode() {
-    final String geoHash = "u173zq37x014";
-    assertEquals(geoHash, GeoHashUtils.stringEncode(4.8909347, 52.3738007));
-    final long mortonHash = GeoHashUtils.mortonEncode(geoHash);
-    final double lon = GeoEncodingUtils.mortonUnhashLon(mortonHash);
-    final double lat = GeoEncodingUtils.mortonUnhashLat(mortonHash);
-    assertEquals(52.37380061d, GeoEncodingUtils.mortonUnhashLat(mortonHash), 0.000001d);
-    assertEquals(4.8909343d, GeoEncodingUtils.mortonUnhashLon(mortonHash), 0.000001d);
-
-    assertEquals(geoHash, GeoHashUtils.stringEncode(lon, lat));
-  }
-
-  public void testNeighbors() {
-    String geohash = "gcpv";
-    List<String> expectedNeighbors = new ArrayList<>();
-    expectedNeighbors.add("gcpw");
-    expectedNeighbors.add("gcpy");
-    expectedNeighbors.add("u10n");
-    expectedNeighbors.add("gcpt");
-    expectedNeighbors.add("u10j");
-    expectedNeighbors.add("gcps");
-    expectedNeighbors.add("gcpu");
-    expectedNeighbors.add("u10h");
-    Collection<? super String> neighbors = new ArrayList<>();
-    GeoHashUtils.addNeighbors(geohash, neighbors );
-    assertEquals(expectedNeighbors, neighbors);
-
-    // Border odd geohash
-    geohash = "u09x";
-    expectedNeighbors = new ArrayList<>();
-    expectedNeighbors.add("u0c2");
-    expectedNeighbors.add("u0c8");
-    expectedNeighbors.add("u0cb");
-    expectedNeighbors.add("u09r");
-    expectedNeighbors.add("u09z");
-    expectedNeighbors.add("u09q");
-    expectedNeighbors.add("u09w");
-    expectedNeighbors.add("u09y");
-    neighbors = new ArrayList<>();
-    GeoHashUtils.addNeighbors(geohash, neighbors);
-    assertEquals(expectedNeighbors, neighbors);
-
-    // Border even geohash
-    geohash = "u09tv";
-    expectedNeighbors = new ArrayList<>();
-    expectedNeighbors.add("u09wh");
-    expectedNeighbors.add("u09wj");
-    expectedNeighbors.add("u09wn");
-    expectedNeighbors.add("u09tu");
-    expectedNeighbors.add("u09ty");
-    expectedNeighbors.add("u09ts");
-    expectedNeighbors.add("u09tt");
-    expectedNeighbors.add("u09tw");
-    neighbors = new ArrayList<>();
-    GeoHashUtils.addNeighbors(geohash, neighbors );
-    assertEquals(expectedNeighbors, neighbors);
-
-    // Border even and odd geohash
-    geohash = "ezzzz";
-    expectedNeighbors = new ArrayList<>();
-    expectedNeighbors.add("gbpbn");
-    expectedNeighbors.add("gbpbp");
-    expectedNeighbors.add("u0000");
-    expectedNeighbors.add("ezzzy");
-    expectedNeighbors.add("spbpb");
-    expectedNeighbors.add("ezzzw");
-    expectedNeighbors.add("ezzzx");
-    expectedNeighbors.add("spbp8");
-    neighbors = new ArrayList<>();
-    GeoHashUtils.addNeighbors(geohash, neighbors );
-    assertEquals(expectedNeighbors, neighbors);
-  }
-
-  public void testClosestPointOnBBox() {
-    double[] result = new double[2];
-    GeoDistanceUtils.closestPointOnBBox(20, 30, 40, 50, 70, 70, result);
-    assertEquals(40.0, result[0], 0.0);
-    assertEquals(50.0, result[1], 0.0);
-
-    GeoDistanceUtils.closestPointOnBBox(-20, -20, 0, 0, 70, 70, result);
-    assertEquals(0.0, result[0], 0.0);
-    assertEquals(0.0, result[1], 0.0);
-  }
-
-  private static class Cell {
-    static int nextCellID;
-
-    final Cell parent;
-    final int cellID;
-    final double minLon, maxLon;
-    final double minLat, maxLat;
-    final int splitCount;
-
-    public Cell(Cell parent,
-                double minLon, double minLat,
-                double maxLon, double maxLat,
-                int splitCount) {
-      assert maxLon >= minLon;
-      assert maxLat >= minLat;
-      this.parent = parent;
-      this.minLon = minLon;
-      this.minLat = minLat;
-      this.maxLon = maxLon;
-      this.maxLat = maxLat;
-      this.cellID = nextCellID++;
-      this.splitCount = splitCount;
-    }
-
-    /** Returns true if the quantized point lies within this cell, inclusive on all bounds. */
-    public boolean contains(double lon, double lat) {
-      return lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat;
-    }
-
-    @Override
-    public String toString() {
-      return "cell=" + cellID + (parent == null ? "" : " parentCellID=" + parent.cellID) + " lon: " + minLon + " TO " + maxLon + ", lat: " + minLat + " TO " + maxLat + ", splits: " + splitCount;
     }
   }
 
@@ -271,7 +73,7 @@ public class TestGeoUtils extends LuceneTestCase {
   public double randomLat(boolean small) {
     double result;
     if (small) {
-      result = GeoUtils.normalizeLat(originLat + latRange * (random().nextDouble() - 0.5));
+      result = BaseGeoPointTestCase.normalizeLat(originLat + latRange * (random().nextDouble() - 0.5));
     } else {
       result = -90 + 180.0 * random().nextDouble();
     }
@@ -281,268 +83,11 @@ public class TestGeoUtils extends LuceneTestCase {
   public double randomLon(boolean small) {
     double result;
     if (small) {
-      result = GeoUtils.normalizeLon(originLon + lonRange * (random().nextDouble() - 0.5));
+      result = BaseGeoPointTestCase.normalizeLon(originLon + lonRange * (random().nextDouble() - 0.5));
     } else {
       result = -180 + 360.0 * random().nextDouble();
     }
     return result;
-  }
-
-  private void findMatches(Set<Integer> hits, PrintWriter log, Cell root,
-                           double centerLon, double centerLat, double radiusMeters,
-                           double[] docLons, double[] docLats) {
-
-    if (VERBOSE) {
-      log.println("  root cell: " + root);
-    }
-
-    List<Cell> queue = new ArrayList<>();
-    queue.add(root);
-
-    int recurseDepth = RandomInts.randomIntBetween(random(), 5, 15);
-
-    while (queue.size() > 0) {
-      Cell cell = queue.get(queue.size()-1);
-      queue.remove(queue.size()-1);
-      if (VERBOSE) {
-        log.println("  cycle: " + cell + " queue.size()=" + queue.size());
-      }
-
-      if (random().nextInt(10) == 7 || cell.splitCount > recurseDepth) {
-        if (VERBOSE) {
-          log.println("    leaf");
-        }
-        // Leaf cell: brute force check all docs that fall within this cell:
-        for(int docID=0;docID<docLons.length;docID++) {
-          if (cell.contains(docLons[docID], docLats[docID])) {
-            double distanceMeters = GeoDistanceUtils.haversin(centerLat, centerLon, docLats[docID], docLons[docID]);
-            if (distanceMeters <= radiusMeters) {
-              if (VERBOSE) {
-                log.println("    check doc=" + docID + ": match!");
-              }
-              hits.add(docID);
-            } else {
-              if (VERBOSE) {
-                log.println("    check doc=" + docID + ": no match");
-              }
-            }
-          }
-        }
-      } else {
-
-        if (GeoRelationUtils.rectWithinCircle(cell.minLon, cell.minLat, cell.maxLon, cell.maxLat, centerLon, centerLat, radiusMeters)) {
-          // Query circle fully contains this cell, just addAll:
-          if (VERBOSE) {
-            log.println("    circle fully contains cell: now addAll");
-          }
-          for(int docID=0;docID<docLons.length;docID++) {
-            if (cell.contains(docLons[docID], docLats[docID])) {
-              if (VERBOSE) {
-                log.println("    addAll doc=" + docID);
-              }
-              hits.add(docID);
-            }
-          }
-          continue;
-        } else if (GeoRelationUtils.rectWithin(root.minLon, root.minLat, root.maxLon, root.maxLat,
-                                       cell.minLon, cell.minLat, cell.maxLon, cell.maxLat)) {
-          // Fall through below to "recurse"
-          if (VERBOSE) {
-            log.println("    cell fully contains circle: keep splitting");
-          }
-        } else if (GeoRelationUtils.rectCrossesCircle(cell.minLon, cell.minLat, cell.maxLon, cell.maxLat,
-                                              centerLon, centerLat, radiusMeters)) {
-          // Fall through below to "recurse"
-          if (VERBOSE) {
-            log.println("    cell overlaps circle: keep splitting");
-          }
-        } else {
-          if (VERBOSE) {
-            log.println("    no overlap: drop this cell");
-            for(int docID=0;docID<docLons.length;docID++) {
-              if (cell.contains(docLons[docID], docLats[docID])) {
-                if (VERBOSE) {
-                  log.println("    skip doc=" + docID);
-                }
-              }
-            }
-          }
-          continue;
-        }
-          
-        // Randomly split:
-        if (random().nextBoolean()) {
-
-          // Split on lon:
-          double splitValue = cell.minLon + (cell.maxLon - cell.minLon) * random().nextDouble();
-          if (VERBOSE) {
-            log.println("    now split on lon=" + splitValue);
-          }
-          Cell cell1 = new Cell(cell,
-                                cell.minLon, cell.minLat,
-                                splitValue, cell.maxLat,
-                                cell.splitCount+1);
-          Cell cell2 = new Cell(cell,
-                                splitValue, cell.minLat,
-                                cell.maxLon, cell.maxLat,
-                                cell.splitCount+1);
-          if (VERBOSE) {
-            log.println("    split cell1: " + cell1);
-            log.println("    split cell2: " + cell2);
-          }
-          queue.add(cell1);
-          queue.add(cell2);
-        } else {
-
-          // Split on lat:
-          double splitValue = cell.minLat + (cell.maxLat - cell.minLat) * random().nextDouble();
-          if (VERBOSE) {
-            log.println("    now split on lat=" + splitValue);
-          }
-          Cell cell1 = new Cell(cell,
-                                cell.minLon, cell.minLat,
-                                cell.maxLon, splitValue,
-                                cell.splitCount+1);
-          Cell cell2 = new Cell(cell,
-                                cell.minLon, splitValue,
-                                cell.maxLon, cell.maxLat,
-                                cell.splitCount+1);
-          if (VERBOSE) {
-            log.println("    split cells:\n      " + cell1 + "\n      " + cell2);
-          }
-          queue.add(cell1);
-          queue.add(cell2);
-        }
-      }
-    }
-  }
-
-  /** Tests consistency of GeoEncodingUtils.rectWithinCircle, .rectCrossesCircle, .rectWithin and SloppyMath.haversine distance check */
-  public void testGeoRelations() throws Exception {
-
-    int numDocs = atLeast(1000);
-    
-    boolean useSmallRanges = random().nextBoolean();
-
-    if (VERBOSE) {
-      System.out.println("TEST: " + numDocs + " docs useSmallRanges=" + useSmallRanges);
-    }
-
-    double[] docLons = new double[numDocs];
-    double[] docLats = new double[numDocs];
-    for(int docID=0;docID<numDocs;docID++) {
-      docLons[docID] = randomLon(useSmallRanges);
-      docLats[docID] = randomLat(useSmallRanges);
-      if (VERBOSE) {
-        System.out.println("  doc=" + docID + ": lon=" + docLons[docID] + " lat=" + docLats[docID]);
-      }
-    }
-
-    int iters = atLeast(10);
-
-    iters = atLeast(50);
-    
-    for(int iter=0;iter<iters;iter++) {
-
-      Cell.nextCellID = 0;
-
-      double centerLon = randomLon(useSmallRanges);
-      double centerLat = randomLat(useSmallRanges);
-
-      // So the circle covers at most 50% of the earth's surface:
-
-      double radiusMeters;
-
-      // TODO: large exotic rectangles created by BKD may be inaccurate up to 2 times DISTANCE_PCT_ERR.
-      // restricting size until LUCENE-6994 can be addressed
-      if (true || useSmallRanges) {
-        // Approx 3 degrees lon at the equator:
-        radiusMeters = random().nextDouble() * 333000;
-      } else {
-        radiusMeters = random().nextDouble() * GeoProjectionUtils.SEMIMAJOR_AXIS * Math.PI / 2.0;
-      }
-
-      StringWriter sw = new StringWriter();
-      PrintWriter log = new PrintWriter(sw, true);
-
-      if (VERBOSE) {
-        log.println("\nTEST: iter=" + iter + " radiusMeters=" + radiusMeters + " centerLon=" + centerLon + " centerLat=" + centerLat);
-      }
-
-      GeoRect bbox = GeoUtils.circleToBBox(centerLon, centerLat, radiusMeters);
-      
-      Set<Integer> hits = new HashSet<>();
-
-      if (bbox.maxLon < bbox.minLon) {
-        // Crosses dateline
-        log.println("  circle crosses dateline; first left query");
-        double unwrappedLon = centerLon;
-        if (unwrappedLon > bbox.maxLon) {
-          // unwrap left
-          unwrappedLon += -360.0D;
-        }
-        findMatches(hits, log,
-                    new Cell(null,
-                             -180, bbox.minLat,
-                             bbox.maxLon, bbox.maxLat,
-                             0),
-                    unwrappedLon, centerLat, radiusMeters, docLons, docLats);
-        log.println("  circle crosses dateline; now right query");
-        if (unwrappedLon < bbox.maxLon) {
-          // unwrap right
-          unwrappedLon += 360.0D;
-        }
-        findMatches(hits, log,
-                    new Cell(null,
-                             bbox.minLon, bbox.minLat,
-                             180, bbox.maxLat,
-                             0),
-                    unwrappedLon, centerLat, radiusMeters, docLons, docLats);
-      } else {
-        // Start with the root cell that fully contains the shape:
-        findMatches(hits, log,
-                    new Cell(null,
-                             bbox.minLon, bbox.minLat,
-                             bbox.maxLon, bbox.maxLat,
-                             0),
-                    centerLon, centerLat, radiusMeters,
-                    docLons, docLats);
-      }
-
-      if (VERBOSE) {
-        log.println("  " + hits.size() + " hits");
-      }
-
-      int failCount = 0;
-
-      // Done matching, now verify:
-      for(int docID=0;docID<numDocs;docID++) {
-        double distanceMeters = GeoDistanceUtils.haversin(centerLat, centerLon, docLats[docID], docLons[docID]);
-        final Boolean expected;
-        final double percentError = Math.abs(distanceMeters - radiusMeters) / distanceMeters;
-        if (percentError <= DISTANCE_PCT_ERR) {
-          expected = null;
-        } else {
-          expected = distanceMeters <= radiusMeters;
-        }
-
-        boolean actual = hits.contains(docID);
-        if (expected != null && actual != expected) {
-          if (actual) {
-            log.println("doc=" + docID + " matched but should not with distance error " + percentError + " on iteration " + iter);
-          } else {
-            log.println("doc=" + docID + " did not match but should with distance error " + percentError + " on iteration " + iter);
-          }
-          log.println("  lon=" + docLons[docID] + " lat=" + docLats[docID] + " distanceMeters=" + distanceMeters + " vs radiusMeters=" + radiusMeters);
-          failCount++;
-        }
-      }
-
-      if (failCount != 0) {
-        System.out.print(sw.toString());
-        fail(failCount + " incorrect hits (see above)");
-      }
-    }
   }
 
   /**
@@ -554,12 +99,226 @@ public class TestGeoUtils extends LuceneTestCase {
     long decodedHash;
     BytesRefBuilder brb = new BytesRefBuilder();
     while (numIters-- >= 0) {
-      hash = GeoEncodingUtils.mortonHash(randomLon(false), randomLat(false));
+      hash = GeoEncodingUtils.mortonHash(randomLat(false), randomLon(false));
       for (int i=32; i<64; ++i) {
         GeoEncodingUtils.geoCodedToPrefixCoded(hash, i, brb);
         decodedHash = GeoEncodingUtils.prefixCodedToGeoCoded(brb.get());
         assertEquals((hash >>> i) << i, decodedHash);
       }
     }
+  }
+
+  public void testMortonEncoding() throws Exception {
+    long hash = GeoEncodingUtils.mortonHash(90, 180);
+    assertEquals(180.0, GeoEncodingUtils.mortonUnhashLon(hash), 0);
+    assertEquals(90.0, GeoEncodingUtils.mortonUnhashLat(hash), 0);
+  }
+
+  public void testEncodeDecode() throws Exception {
+    int iters = atLeast(10000);
+    boolean small = random().nextBoolean();
+    for(int iter=0;iter<iters;iter++) {
+      double lat = randomLat(small);
+      double lon = randomLon(small);
+
+      long enc = GeoEncodingUtils.mortonHash(lat, lon);
+      double latEnc = GeoEncodingUtils.mortonUnhashLat(enc);
+      double lonEnc = GeoEncodingUtils.mortonUnhashLon(enc);
+
+      assertEquals("lat=" + lat + " latEnc=" + latEnc + " diff=" + (lat - latEnc), lat, latEnc, GeoEncodingUtils.TOLERANCE);
+      assertEquals("lon=" + lon + " lonEnc=" + lonEnc + " diff=" + (lon - lonEnc), lon, lonEnc, GeoEncodingUtils.TOLERANCE);
+    }
+  }
+
+  public void testScaleUnscaleIsStable() throws Exception {
+    int iters = atLeast(1000);
+    boolean small = random().nextBoolean();
+    for(int iter=0;iter<iters;iter++) {
+      double lat = randomLat(small);
+      double lon = randomLon(small);
+
+      long enc = GeoEncodingUtils.mortonHash(lat, lon);
+      double latEnc = GeoEncodingUtils.mortonUnhashLat(enc);
+      double lonEnc = GeoEncodingUtils.mortonUnhashLon(enc);
+
+      long enc2 = GeoEncodingUtils.mortonHash(lat, lon);
+      double latEnc2 = GeoEncodingUtils.mortonUnhashLat(enc2);
+      double lonEnc2 = GeoEncodingUtils.mortonUnhashLon(enc2);
+      assertEquals(latEnc, latEnc2, 0.0);
+      assertEquals(lonEnc, lonEnc2, 0.0);
+    }
+  }
+
+  /** Returns random double min to max or up to 1% outside of that range */
+  private double randomRangeMaybeSlightlyOutside(double min, double max) {
+    return min + (random().nextDouble() + (0.5 - random().nextDouble()) * .02) * (max - min);
+  }
+
+  // We rely heavily on GeoUtils.circleToBBox so we test it here:
+  public void testRandomCircleToBBox() throws Exception {
+    int iters = atLeast(1000);
+    for(int iter=0;iter<iters;iter++) {
+
+      boolean useSmallRanges = random().nextBoolean();
+
+      double radiusMeters;
+
+      double centerLat = randomLat(useSmallRanges);
+      double centerLon = randomLon(useSmallRanges);
+
+      if (useSmallRanges) {
+        // Approx 4 degrees lon at the equator:
+        radiusMeters = random().nextDouble() * 444000;
+      } else {
+        radiusMeters = random().nextDouble() * 50000000;
+      }
+
+      // TODO: randomly quantize radius too, to provoke exact math errors?
+
+      GeoRect bbox = GeoUtils.circleToBBox(centerLat, centerLon, radiusMeters);
+
+      int numPointsToTry = 1000;
+      for(int i=0;i<numPointsToTry;i++) {
+
+        double lat;
+        double lon;
+
+        if (random().nextBoolean()) {
+          lat = randomLat(useSmallRanges);
+          lon = randomLon(useSmallRanges);
+        } else {
+          // pick a lat/lon within the bbox or "slightly" outside it to try to improve test efficiency
+          lat = BaseGeoPointTestCase.normalizeLat(randomRangeMaybeSlightlyOutside(bbox.minLat, bbox.maxLat));
+          if (bbox.crossesDateline()) {
+            if (random().nextBoolean()) {
+              lon = BaseGeoPointTestCase.normalizeLon(randomRangeMaybeSlightlyOutside(bbox.maxLon, -180));
+            } else {
+              lon = BaseGeoPointTestCase.normalizeLon(randomRangeMaybeSlightlyOutside(0, bbox.minLon));
+            }
+          } else {
+            lon = BaseGeoPointTestCase.normalizeLon(randomRangeMaybeSlightlyOutside(bbox.minLon, bbox.maxLon));
+          }
+        }
+
+        double distanceMeters = SloppyMath.haversinMeters(centerLat, centerLon, lat, lon);
+
+        // Haversin says it's within the circle:
+        boolean haversinSays = distanceMeters <= radiusMeters;
+
+        // BBox says its within the box:
+        boolean bboxSays;
+        if (bbox.crossesDateline()) {
+          if (lat >= bbox.minLat && lat <= bbox.maxLat) {
+            bboxSays = lon <= bbox.maxLon || lon >= bbox.minLon;
+          } else {
+            bboxSays = false;
+          }
+        } else {
+          bboxSays = lat >= bbox.minLat && lat <= bbox.maxLat && lon >= bbox.minLon && lon <= bbox.maxLon;
+        }
+
+        if (haversinSays) {
+          if (bboxSays == false) {
+            System.out.println("small=" + useSmallRanges + " centerLat=" + centerLat + " cetnerLon=" + centerLon + " radiusMeters=" + radiusMeters);
+            System.out.println("  bbox: lat=" + bbox.minLat + " to " + bbox.maxLat + " lon=" + bbox.minLon + " to " + bbox.maxLon);
+            System.out.println("  point: lat=" + lat + " lon=" + lon);
+            System.out.println("  haversin: " + distanceMeters);
+            fail("point was within the distance according to haversin, but the bbox doesn't contain it");
+          }
+        } else {
+          // it's fine if haversin said it was outside the radius and bbox said it was inside the box
+        }
+      }
+    }
+  }
+  
+  // similar to testRandomCircleToBBox, but different, less evil, maybe simpler
+  public void testBoundingBoxOpto() {
+    for (int i = 0; i < 1000; i++) {
+      double lat = -90 + 180.0 * random().nextDouble();
+      double lon = -180 + 360.0 * random().nextDouble();
+      double radius = 50000000 * random().nextDouble();
+      GeoRect box = GeoUtils.circleToBBox(lat, lon, radius);
+      final GeoRect box1;
+      final GeoRect box2;
+      if (box.crossesDateline()) {
+        box1 = new GeoRect(box.minLat, box.maxLat, -180, box.maxLon);
+        box2 = new GeoRect(box.minLat, box.maxLat, box.minLon, 180);
+      } else {
+        box1 = box;
+        box2 = null;
+      }
+      
+      for (int j = 0; j < 10000; j++) {
+        double lat2 = -90 + 180.0 * random().nextDouble();
+        double lon2 = -180 + 360.0 * random().nextDouble();
+        // if the point is within radius, then it should be in our bounding box
+        if (SloppyMath.haversinMeters(lat, lon, lat2, lon2) <= radius) {
+          assertTrue(lat >= box.minLat && lat <= box.maxLat);
+          assertTrue(lon >= box1.minLon && lon <= box1.maxLon || (box2 != null && lon >= box2.minLon && lon <= box2.maxLon));
+        }
+      }
+    }
+  }
+
+  // test we can use haversinSortKey() for distance queries.
+  public void testHaversinOpto() {
+    for (int i = 0; i < 1000; i++) {
+      double lat = -90 + 180.0 * random().nextDouble();
+      double lon = -180 + 360.0 * random().nextDouble();
+      double radius = 50000000 * random().nextDouble();
+      GeoRect box = GeoUtils.circleToBBox(lat, lon, radius);
+
+      if (box.maxLon - lon < 90 && lon - box.minLon < 90) {
+        double minPartialDistance = Math.max(SloppyMath.haversinSortKey(lat, lon, lat, box.maxLon),
+                                             SloppyMath.haversinSortKey(lat, lon, box.maxLat, lon));
+      
+        for (int j = 0; j < 10000; j++) {
+          double lat2 = -90 + 180.0 * random().nextDouble();
+          double lon2 = -180 + 360.0 * random().nextDouble();
+          // if the point is within radius, then it should be <= our sort key
+          if (SloppyMath.haversinMeters(lat, lon, lat2, lon2) <= radius) {
+            assertTrue(SloppyMath.haversinSortKey(lat, lon, lat2, lon2) <= minPartialDistance);
+          }
+        }
+      }
+    }
+  }
+
+  /** Test infinite radius covers whole earth */
+  public void testInfiniteRect() {
+    for (int i = 0; i < 1000; i++) {
+      double centerLat = -90 + 180.0 * random().nextDouble();
+      double centerLon = -180 + 360.0 * random().nextDouble();
+      GeoRect rect = GeoUtils.circleToBBox(centerLat, centerLon, Double.POSITIVE_INFINITY);
+      assertEquals(-180.0, rect.minLon, 0.0D);
+      assertEquals(180.0, rect.maxLon, 0.0D);
+      assertEquals(-90.0, rect.minLat, 0.0D);
+      assertEquals(90.0, rect.maxLat, 0.0D);
+      assertFalse(rect.crossesDateline());
+    }
+  }
+  
+  public void testPacManPolyQuery() throws Exception {
+    // pacman
+    double[] px = {0, 10, 10, 0, -8, -10, -8, 0, 10, 10, 0};
+    double[] py = {0, 5, 9, 10, 9, 0, -9, -10, -9, -5, 0};
+
+    // shape bbox
+    double xMinA = -10;
+    double xMaxA = 10;
+    double yMinA = -10;
+    double yMaxA = 10;
+
+    // candidate crosses cell
+    double xMin = 2;//-5;
+    double xMax = 11;//0.000001;
+    double yMin = -1;//0;
+    double yMax = 1;//5;
+
+    // test cell crossing poly
+    assertTrue(GeoRelationUtils.rectCrossesPolyApprox(yMin, yMax, xMin, yMax, py, px, yMinA, yMaxA, xMinA, xMaxA));
+    assertFalse(GeoRelationUtils.rectCrossesPolyApprox(0, 5, -5, 0.000001, py, px, yMin, yMax, xMin, xMax));
+    assertTrue(GeoRelationUtils.rectWithinPolyApprox(0, 5, -5, -2, py, px, yMin, yMax, xMin, xMax));
   }
 }

@@ -126,16 +126,6 @@ public final class DoublePoint extends Field {
     return result.toString();
   }
   
-  /** Encode n-dimensional double point into binary encoding */
-  private static byte[][] encode(double value[]) {
-    byte[][] encoded = new byte[value.length][];
-    for (int i = 0; i < value.length; i++) {
-      encoded[i] = new byte[Double.BYTES];
-      encodeDimension(value[i], encoded[i], 0);
-    }
-    return encoded;
-  }
-  
   // public helper methods (e.g. for queries)
   
   /** Encode single double dimension */
@@ -172,7 +162,9 @@ public final class DoublePoint extends Field {
    * {@link #newRangeQuery(String, double[], double[])} instead.
    * <p>
    * You can have half-open ranges (which are in fact &lt;/&le; or &gt;/&ge; queries)
-   * by setting {@code lowerValue = Double.NEGATIVE_INFINITY} or {@code upperValue = Double.POSITIVE_INFINITY}. 
+   * by setting {@code lowerValue = Double.NEGATIVE_INFINITY} or {@code upperValue = Double.POSITIVE_INFINITY}.
+   * <p> Ranges are inclusive. For exclusive ranges, pass {@code Math#nextUp(lowerValue)}
+   * or {@code Math.nextDown(upperValue)}.
    * <p>
    * Range comparisons are consistent with {@link Double#compareTo(Double)}.
    *
@@ -190,7 +182,9 @@ public final class DoublePoint extends Field {
    * Create a range query for n-dimensional double values.
    * <p>
    * You can have half-open ranges (which are in fact &lt;/&le; or &gt;/&ge; queries)
-   * by setting {@code lowerValue[i] = Double.NEGATIVE_INFINITY} or {@code upperValue[i] = Double.POSITIVE_INFINITY}. 
+   * by setting {@code lowerValue[i] = Double.NEGATIVE_INFINITY} or {@code upperValue[i] = Double.POSITIVE_INFINITY}.
+   * <p> Ranges are inclusive. For exclusive ranges, pass {@code Math#nextUp(lowerValue[i])}
+   * or {@code Math.nextDown(upperValue[i])}.
    * <p>
    * Range comparisons are consistent with {@link Double#compareTo(Double)}.
    *
@@ -203,7 +197,7 @@ public final class DoublePoint extends Field {
    */
   public static Query newRangeQuery(String field, double[] lowerValue, double[] upperValue) {
     PointRangeQuery.checkArgs(field, lowerValue, upperValue);
-    return new PointRangeQuery(field, encode(lowerValue), encode(upperValue)) {
+    return new PointRangeQuery(field, pack(lowerValue).bytes, pack(upperValue).bytes, lowerValue.length) {
       @Override
       protected String toString(int dimension, byte[] value) {
         return Double.toString(decodeDimension(value, 0));

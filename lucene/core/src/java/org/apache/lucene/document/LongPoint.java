@@ -126,16 +126,6 @@ public final class LongPoint extends Field {
     return result.toString();
   }
   
-  /** Encode n-dimensional long values into binary encoding */
-  private static byte[][] encode(long value[]) {
-    byte[][] encoded = new byte[value.length][];
-    for (int i = 0; i < value.length; i++) {
-      encoded[i] = new byte[Long.BYTES];
-      encodeDimension(value[i], encoded[i], 0);
-    }
-    return encoded;
-  }
-  
   // public helper methods (e.g. for queries)
   
   /** Encode single long dimension */
@@ -174,7 +164,8 @@ public final class LongPoint extends Field {
    * You can have half-open ranges (which are in fact &lt;/&le; or &gt;/&ge; queries)
    * by setting {@code lowerValue = Long.MIN_VALUE} or {@code upperValue = Long.MAX_VALUE}. 
    * <p>
-   * Ranges are inclusive. For exclusive ranges, pass {@code lowerValue + 1} or {@code upperValue - 1}
+   * Ranges are inclusive. For exclusive ranges, pass {@code Math.addExact(lowerValue, 1)}
+   * or {@code Math.addExact(upperValue, -1)}.
    *
    * @param field field name. must not be {@code null}.
    * @param lowerValue lower portion of the range (inclusive).
@@ -192,7 +183,8 @@ public final class LongPoint extends Field {
    * You can have half-open ranges (which are in fact &lt;/&le; or &gt;/&ge; queries)
    * by setting {@code lowerValue[i] = Long.MIN_VALUE} or {@code upperValue[i] = Long.MAX_VALUE}. 
    * <p>
-   * Ranges are inclusive. For exclusive ranges, pass {@code lowerValue[i] + 1} or {@code upperValue[i] - 1}
+   * Ranges are inclusive. For exclusive ranges, pass {@code Math.addExact(lowerValue[i], 1)}
+   * or {@code Math.addExact(upperValue[i], -1)}.
    *
    * @param field field name. must not be {@code null}.
    * @param lowerValue lower portion of the range (inclusive). must not be {@code null}.
@@ -203,7 +195,7 @@ public final class LongPoint extends Field {
    */
   public static Query newRangeQuery(String field, long[] lowerValue, long[] upperValue) {
     PointRangeQuery.checkArgs(field, lowerValue, upperValue);
-    return new PointRangeQuery(field, encode(lowerValue), encode(upperValue)) {
+    return new PointRangeQuery(field, pack(lowerValue).bytes, pack(upperValue).bytes, lowerValue.length) {
       @Override
       protected String toString(int dimension, byte[] value) {
         return Long.toString(decodeDimension(value, 0));

@@ -52,28 +52,28 @@ abstract class GeoPointMultiTermQuery extends MultiTermQuery {
    * Constructs a query matching terms that cannot be represented with a single
    * Term.
    */
-  public GeoPointMultiTermQuery(String field, final TermEncoding termEncoding, final double minLon, final double minLat, final double maxLon, final double maxLat) {
+  public GeoPointMultiTermQuery(String field, final TermEncoding termEncoding, final double minLat, final double maxLat, final double minLon, final double maxLon) {
     super(field);
 
-    if (GeoUtils.isValidLon(minLon) == false) {
-      throw new IllegalArgumentException("invalid minLon " + minLon);
-    }
-    if (GeoUtils.isValidLon(maxLon) == false) {
-      throw new IllegalArgumentException("invalid maxLon " + maxLon);
-    }
     if (GeoUtils.isValidLat(minLat) == false) {
       throw new IllegalArgumentException("invalid minLat " + minLat);
     }
     if (GeoUtils.isValidLat(maxLat) == false) {
       throw new IllegalArgumentException("invalid maxLat " + maxLat);
     }
+    if (GeoUtils.isValidLon(minLon) == false) {
+      throw new IllegalArgumentException("invalid minLon " + minLon);
+    }
+    if (GeoUtils.isValidLon(maxLon) == false) {
+      throw new IllegalArgumentException("invalid maxLon " + maxLon);
+    }
 
-    final long minHash = GeoEncodingUtils.mortonHash(minLon, minLat);
-    final long maxHash = GeoEncodingUtils.mortonHash(maxLon, maxLat);
-    this.minLon = GeoEncodingUtils.mortonUnhashLon(minHash);
+    final long minHash = GeoEncodingUtils.mortonHash(minLat, minLon);
+    final long maxHash = GeoEncodingUtils.mortonHash(maxLat, maxLon);
     this.minLat = GeoEncodingUtils.mortonUnhashLat(minHash);
-    this.maxLon = GeoEncodingUtils.mortonUnhashLon(maxHash);
     this.maxLat = GeoEncodingUtils.mortonUnhashLat(maxHash);
+    this.minLon = GeoEncodingUtils.mortonUnhashLon(minHash);
+    this.maxLon = GeoEncodingUtils.mortonUnhashLon(maxHash);
 
     this.maxShift = computeMaxShift();
     this.termEncoding = termEncoding;
@@ -98,14 +98,14 @@ abstract class GeoPointMultiTermQuery extends MultiTermQuery {
    * Computes the maximum shift based on the diagonal distance of the bounding box
    */
   protected short computeMaxShift() {
-    // in this case a factor of 4 brings the detail level to ~0.002/0.001 degrees lon/lat respectively (or ~222m/111m)
+    // in this case a factor of 4 brings the detail level to ~0.001/0.002 degrees lat/lon respectively (or ~111m/222m)
     final short shiftFactor;
 
     // compute diagonal distance
     double midLon = (minLon + maxLon) * 0.5;
     double midLat = (minLat + maxLat) * 0.5;
 
-    if (SloppyMath.haversin(minLat, minLon, midLat, midLon)*1000 > 1000000) {
+    if (SloppyMath.haversinMeters(minLat, minLon, midLat, midLon) > 1000000) {
       shiftFactor = 5;
     } else {
       shiftFactor = 4;
@@ -133,34 +133,34 @@ abstract class GeoPointMultiTermQuery extends MultiTermQuery {
     /**
      * Primary driver for cells intersecting shape boundaries
      */
-    protected boolean cellIntersectsMBR(final double minLon, final double minLat, final double maxLon, final double maxLat) {
-      return GeoRelationUtils.rectIntersects(minLon, minLat, maxLon, maxLat, geoPointQuery.minLon, geoPointQuery.minLat,
-          geoPointQuery.maxLon, geoPointQuery.maxLat);
+    protected boolean cellIntersectsMBR(final double minLat, final double maxLat, final double minLon, final double maxLon) {
+      return GeoRelationUtils.rectIntersects(minLat, maxLat, minLon, maxLon, geoPointQuery.minLat, geoPointQuery.maxLat,
+                                             geoPointQuery.minLon, geoPointQuery.maxLon);
     }
 
     /**
      * Return whether quad-cell contains the bounding box of this shape
      */
-    protected boolean cellContains(final double minLon, final double minLat, final double maxLon, final double maxLat) {
-      return GeoRelationUtils.rectWithin(geoPointQuery.minLon, geoPointQuery.minLat, geoPointQuery.maxLon,
-          geoPointQuery.maxLat, minLon, minLat, maxLon, maxLat);
+    protected boolean cellContains(final double minLat, final double maxLat, final double minLon, final double maxLon) {
+      return GeoRelationUtils.rectWithin(geoPointQuery.minLat, geoPointQuery.maxLat, geoPointQuery.minLon,
+                                         geoPointQuery.maxLon, minLat, maxLat, minLon, maxLon);
     }
 
     /**
      * Determine whether the quad-cell crosses the shape
      */
-    abstract protected boolean cellCrosses(final double minLon, final double minLat, final double maxLon, final double maxLat);
+    abstract protected boolean cellCrosses(final double minLat, final double maxLat, final double minLon, final double maxLon);
 
     /**
      * Determine whether quad-cell is within the shape
      */
-    abstract protected boolean cellWithin(final double minLon, final double minLat, final double maxLon, final double maxLat);
+    abstract protected boolean cellWithin(final double minLat, final double maxLat, final double minLon, final double maxLon);
 
     /**
      * Default shape is a rectangle, so this returns the same as {@code cellIntersectsMBR}
      */
-    abstract protected boolean cellIntersectsShape(final double minLon, final double minLat, final double maxLon, final double maxLat);
+    abstract protected boolean cellIntersectsShape(final double minLat, final double maxLat, final double minLon, final double maxLon);
 
-    abstract protected boolean postFilter(final double lon, final double lat);
+    abstract protected boolean postFilter(final double lat, final double lon);
   }
 }

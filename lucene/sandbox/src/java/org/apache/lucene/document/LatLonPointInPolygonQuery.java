@@ -169,13 +169,13 @@ final class LatLonPointInPolygonQuery extends Query {
                              if (cellMinLat <= minLat && cellMaxLat >= maxLat && cellMinLon <= minLon && cellMaxLon >= maxLon) {
                                // Cell fully encloses the query
                                return Relation.CELL_CROSSES_QUERY;
-                             } else  if (GeoRelationUtils.rectWithinPolyPrecise(cellMinLon, cellMinLat, cellMaxLon, cellMaxLat,
-                                                                 polyLons, polyLats,
-                                                                 minLon, minLat, maxLon, maxLat)) {
+                             } else  if (GeoRelationUtils.rectWithinPolyPrecise(cellMinLat, cellMaxLat, cellMinLon, cellMaxLon,
+                                                                                polyLats, polyLons,
+                                                                                minLat, maxLat, minLon, maxLon)) {
                                return Relation.CELL_INSIDE_QUERY;
-                             } else if (GeoRelationUtils.rectCrossesPolyPrecise(cellMinLon, cellMinLat, cellMaxLon, cellMaxLat,
-                                                                 polyLons, polyLats,
-                                                                 minLon, minLat, maxLon, maxLat)) {
+                             } else if (GeoRelationUtils.rectCrossesPolyPrecise(cellMinLat, cellMaxLat, cellMinLon, cellMaxLon,
+                                                                                polyLats, polyLons,
+                                                                                minLat, maxLat, minLon, maxLon)) {
                                return Relation.CELL_CROSSES_QUERY;
                              } else {
                                return Relation.CELL_OUTSIDE_QUERY;
@@ -204,7 +204,7 @@ final class LatLonPointInPolygonQuery extends Query {
                 long encoded = docValues.valueAt(i);
                 double docLatitude = LatLonPoint.decodeLatitude((int)(encoded >> 32));
                 double docLongitude = LatLonPoint.decodeLongitude((int)(encoded & 0xFFFFFFFF));
-                if (GeoRelationUtils.pointInPolygon(polyLons, polyLats, docLatitude, docLongitude)) {
+                if (GeoRelationUtils.pointInPolygon(polyLats, polyLons, docLatitude, docLongitude)) {
                   return true;
                 }
               }
@@ -258,6 +258,9 @@ final class LatLonPointInPolygonQuery extends Query {
 
     LatLonPointInPolygonQuery that = (LatLonPointInPolygonQuery) o;
 
+    if (field.equals(that.field) == false) {
+      return false;
+    }
     if (Arrays.equals(polyLons, that.polyLons) == false) {
       return false;
     }
@@ -269,8 +272,9 @@ final class LatLonPointInPolygonQuery extends Query {
   }
 
   @Override
-  public final int hashCode() {
+  public int hashCode() {
     int result = super.hashCode();
+    result = 31 * result + field.hashCode();
     result = 31 * result + Arrays.hashCode(polyLons);
     result = 31 * result + Arrays.hashCode(polyLats);
     return result;
@@ -289,9 +293,9 @@ final class LatLonPointInPolygonQuery extends Query {
     sb.append(" Points: ");
     for (int i=0; i<polyLons.length; ++i) {
       sb.append("[")
-        .append(polyLons[i])
-        .append(", ")
         .append(polyLats[i])
+        .append(", ")
+        .append(polyLons[i])
         .append("] ");
     }
     return sb.toString();
