@@ -17,24 +17,21 @@
 package org.apache.solr.response.transform;
 
 import java.io.IOException;
-import org.apache.lucene.index.Term;
+
+import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.TermQuery;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.BasicResultContext;
-import org.apache.solr.response.transform.DocTransformer;
-import org.apache.solr.response.transform.TransformerFactory;
+import org.apache.solr.schema.SchemaField;
 import org.apache.solr.search.DocList;
 import org.apache.solr.search.QParser;
 import org.apache.solr.search.QParserPlugin;
 import org.apache.solr.search.SolrReturnFields;
 import org.apache.solr.search.SyntaxError;
-
-import com.natelenergy.drop3.solr.SolrClientUtil;
 
 
 public class QueryTransformerFactory extends TransformerFactory
@@ -67,17 +64,23 @@ public class QueryTransformerFactory extends TransformerFactory
       }
     }
     
-    String joinField = params.get("j");
-    if(joinField ==null) {
+    String queryFieldName = params.get("f");
+    if(queryFieldName == null) {
       throw new SolrException(ErrorCode.BAD_REQUEST, "Missing param 'j' for join field");
     }
+    SchemaField sf = req.getSchema().getField(queryFieldName);
     
-    String subfl = params.get("sub.fl");
+    
+    String subfl = params.get("q.fl");
     if(subfl==null) {
-      subfl = req.getParams().get("sub.fl");
+      subfl = req.getParams().get("q.fl");
     }
+    if(subfl==null) {
+      throw new SolrException(ErrorCode.BAD_REQUEST, "Missing param 'q.fl'");
+    }
+    
     SolrReturnFields rf = new SolrReturnFields(subfl, req);
-    return new SubQueryAugmenter(field, joinField, filter, rf);
+    return new SubQueryAugmenter(field, sf, filter, rf);
   }
 }
 
@@ -85,19 +88,19 @@ class SubQueryAugmenter extends DocTransformer
 {
   final Query filter;
   final String name;
-  final String joinField;
+  final SchemaField sf;
   final SolrReturnFields rf;
   
-  public SubQueryAugmenter(String name, String joinField, Query filter, SolrReturnFields rf) {
+  public SubQueryAugmenter(String name, SchemaField sf, Query filter, SolrReturnFields rf) {
     this.name = name;
-    this.joinField = joinField;
+    this.sf = sf;
     this.rf = rf;
     this.filter = filter;
   }
 
   @Override
   public String[] getExtraRequestFields() {
-    return new String[] {"id"};
+    return new String[] {sf.getName()};
   }
   
   @Override
@@ -107,20 +110,16 @@ class SubQueryAugmenter extends DocTransformer
 
   @Override
   public void transform(SolrDocument doc, int docid, float score) throws IOException {
-    String id = SolrClientUtil.getString("id", doc);
+    String val = QueryTransformerFactory.getString("id", doc);
     
-    if(context.getQuery()==null || id==null) {
-      return; // this happens for the sub query
-    }
-
-    // TODO, use QParser so we pick the right kind of query!
-    TermQuery q = new TermQuery(new Term(joinField, id));
-    DocList docs = context.getSearcher().getDocList(q, filter, null, 0, 10);
-    if(docs!=null) {
-
-      BasicResultContext rc = new BasicResultContext(docs, rf, context.getSearcher(), q, null);
-
-      doc.setField(name, rc);
+    if(val!=null) {
+      Query q = sf.getType().getFieldQuery(null, sf, val);
+      
+      DocList docs = context.getSearcher().getDocList(q, filter, null, 0, 10);
+      if(docs!=null && docs.size()>0) {
+        BasicResultContext rc = new BasicResultContext(docs, rf, context.getSearcher(), q, null);
+        doc.setField(name, rc);
+      }
     }
   } 
 }
