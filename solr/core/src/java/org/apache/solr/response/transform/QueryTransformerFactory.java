@@ -39,6 +39,17 @@ import com.natelenergy.drop3.solr.SolrClientUtil;
 
 public class QueryTransformerFactory extends TransformerFactory
 { 
+  public static String getString(String k, SolrDocument doc) {
+    Object v = doc.getFirstValue(k);
+    if(v != null) {
+      if(v instanceof IndexableField) {
+        return ((IndexableField)v).stringValue();
+      }
+      return v.toString();
+    }
+    return null;
+  }
+  
   @Override
   public DocTransformer create(String field, SolrParams params, SolrQueryRequest req) {
     
