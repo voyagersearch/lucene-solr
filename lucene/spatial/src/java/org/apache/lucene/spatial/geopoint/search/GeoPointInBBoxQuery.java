@@ -23,7 +23,7 @@ import org.apache.lucene.search.FieldValueQuery;
 import org.apache.lucene.search.LegacyNumericRangeQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.spatial.geopoint.document.GeoPointField.TermEncoding;
-import org.apache.lucene.spatial.util.GeoUtils;
+import org.apache.lucene.geo.GeoUtils;
 
 /** Implements a simple bounding box query on a GeoPoint field. This is inspired by
  * {@link LegacyNumericRangeQuery} and is implemented using a
@@ -72,23 +72,15 @@ public class GeoPointInBBoxQuery extends Query {
    */
   public GeoPointInBBoxQuery(final String field, final TermEncoding termEncoding, final double minLat, final double maxLat, final double minLon, final double maxLon) {
     if (field == null) {
-      throw new IllegalArgumentException("field cannot be null");
+      throw new IllegalArgumentException("field must not be null");
     }
     if (termEncoding == null) {
-      throw new IllegalArgumentException("termEncoding cannot be null");
+      throw new IllegalArgumentException("termEncoding must not be null");
     }
-    if (GeoUtils.isValidLat(minLat) == false) {
-      throw new IllegalArgumentException("invalid minimum latitude: " + minLat + ", must be -90 to 90");
-    }
-    if (GeoUtils.isValidLat(maxLat) == false) {
-      throw new IllegalArgumentException("invalid maximum latitude: " + maxLat + ", must be -90 to 90");
-    }
-    if (GeoUtils.isValidLon(minLon) == false) {
-      throw new IllegalArgumentException("invalid minimum longitude: " + minLon + ", must be -180 to 180");
-    }
-    if (GeoUtils.isValidLon(maxLon) == false) {
-      throw new IllegalArgumentException("invalid maximum longitude: " + maxLon + ", must be -180 to 180");
-    }
+    GeoUtils.checkLatitude(minLat);
+    GeoUtils.checkLatitude(maxLat);
+    GeoUtils.checkLongitude(minLon);
+    GeoUtils.checkLongitude(maxLon);
     this.field = field;
     this.minLat = minLat;
     this.maxLat = maxLat;

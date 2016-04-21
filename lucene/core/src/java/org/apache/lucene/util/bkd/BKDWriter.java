@@ -33,7 +33,6 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.TrackingDirectoryWrapper;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.IntroSorter;
@@ -129,21 +128,31 @@ public class BKDWriter implements Closeable {
   protected long pointCount;
 
   /** true if we have so many values that we must write ords using long (8 bytes) instead of int (4 bytes) */
-  private final boolean longOrds;
+  protected final boolean longOrds;
 
   /** An upper bound on how many points the caller will add (includes deletions) */
   private final long totalPointCount;
 
   /** True if every document has at most one value.  We specialize this case by not bothering to store the ord since it's redundant with docID.  */
-  private final boolean singleValuePerDoc;
+  protected final boolean singleValuePerDoc;
+
+  /** How much heap OfflineSorter is allowed to use */ 
+  protected final OfflineSorter.BufferSize offlineSorterBufferMB;
+
+  /** How much heap OfflineSorter is allowed to use */ 
+  protected final int offlineSorterMaxTempFiles;
 
   private final int maxDoc;
 
-  public BKDWriter(int maxDoc, Directory tempDir, String tempFileNamePrefix, int numDims, int bytesPerDim, long totalPointCount, boolean singleValuePerDoc) throws IOException {
-    this(maxDoc, tempDir, tempFileNamePrefix, numDims, bytesPerDim, DEFAULT_MAX_POINTS_IN_LEAF_NODE, DEFAULT_MAX_MB_SORT_IN_HEAP, totalPointCount, singleValuePerDoc);
+  public BKDWriter(int maxDoc, Directory tempDir, String tempFileNamePrefix, int numDims, int bytesPerDim,
+                   int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount, boolean singleValuePerDoc) throws IOException {
+    this(maxDoc, tempDir, tempFileNamePrefix, numDims, bytesPerDim, maxPointsInLeafNode, maxMBSortInHeap, totalPointCount, singleValuePerDoc,
+         totalPointCount > Integer.MAX_VALUE, Math.max(1, (long) maxMBSortInHeap), OfflineSorter.MAX_TEMPFILES);
   }
 
-  public BKDWriter(int maxDoc, Directory tempDir, String tempFileNamePrefix, int numDims, int bytesPerDim, int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount, boolean singleValuePerDoc) throws IOException {
+  protected BKDWriter(int maxDoc, Directory tempDir, String tempFileNamePrefix, int numDims, int bytesPerDim,
+                      int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount,
+                      boolean singleValuePerDoc, boolean longOrds, long offlineSorterBufferMB, int offlineSorterMaxTempFiles) throws IOException {
     verifyParams(numDims, maxPointsInLeafNode, maxMBSortInHeap, totalPointCount);
     // We use tracking dir to deal with removing files on exception, so each place that
     // creates temp files doesn't need crazy try/finally/sucess logic:
@@ -154,6 +163,8 @@ public class BKDWriter implements Closeable {
     this.bytesPerDim = bytesPerDim;
     this.totalPointCount = totalPointCount;
     this.maxDoc = maxDoc;
+    this.offlineSorterBufferMB = OfflineSorter.BufferSize.megabytes(offlineSorterBufferMB);
+    this.offlineSorterMaxTempFiles = offlineSorterMaxTempFiles;
     docsSeen = new FixedBitSet(maxDoc);
     packedBytesLength = numDims * bytesPerDim;
 
@@ -167,7 +178,8 @@ public class BKDWriter implements Closeable {
     maxPackedValue = new byte[packedBytesLength];
 
     // If we may have more than 1+Integer.MAX_VALUE values, then we must encode ords with long (8 bytes), else we can use int (4 bytes).
-    longOrds = totalPointCount > Integer.MAX_VALUE;
+    this.longOrds = longOrds;
+
     this.singleValuePerDoc = singleValuePerDoc;
 
     // dimensional values (numDims * bytesPerDim) + ord (int or long) + docID (int)
@@ -710,6 +722,8 @@ public class BKDWriter implements Closeable {
       // Offline sort:
       assert tempInput != null;
 
+      final int offset = bytesPerDim * dim;
+
       Comparator<BytesRef> cmp = new Comparator<BytesRef>() {
  
         final ByteArrayDataInput reader = new ByteArrayDataInput();
@@ -717,7 +731,7 @@ public class BKDWriter implements Closeable {
         @Override
         public int compare(BytesRef a, BytesRef b) {
           // First compare by the requested dimension we are sorting by:
-          int cmp = StringHelper.compare(bytesPerDim, a.bytes, a.offset + bytesPerDim*dim, b.bytes, b.offset + bytesPerDim*dim);
+          int cmp = StringHelper.compare(bytesPerDim, a.bytes, a.offset + offset, b.bytes, b.offset + offset);
 
           if (cmp != 0) {
             return cmp;
@@ -733,15 +747,11 @@ public class BKDWriter implements Closeable {
         }
       };
 
-      // TODO: this is sort of sneaky way to get the final OfflinePointWriter from OfflineSorter:
-      IndexOutput[] lastWriter = new IndexOutput[1];
-
-      OfflineSorter sorter = new OfflineSorter(tempDir, tempFileNamePrefix + "_bkd" + dim, cmp, OfflineSorter.BufferSize.megabytes(Math.max(1, (long) maxMBSortInHeap)), OfflineSorter.MAX_TEMPFILES) {
+      OfflineSorter sorter = new OfflineSorter(tempDir, tempFileNamePrefix + "_bkd" + dim, cmp, offlineSorterBufferMB, offlineSorterMaxTempFiles, bytesPerDoc) {
 
           /** We write/read fixed-byte-width file that {@link OfflinePointReader} can read. */
           @Override
           protected ByteSequencesWriter getWriter(IndexOutput out) {
-            lastWriter[0] = out;
             return new ByteSequencesWriter(out) {
               @Override
               public void write(byte[] bytes, int off, int len) throws IOException {
@@ -755,24 +765,22 @@ public class BKDWriter implements Closeable {
           @Override
           protected ByteSequencesReader getReader(ChecksumIndexInput in, String name) throws IOException {
             return new ByteSequencesReader(in, name) {
+              final BytesRef scratch = new BytesRef(new byte[bytesPerDoc]);
               @Override
-              public boolean read(BytesRefBuilder ref) throws IOException {
+              public BytesRef next() throws IOException {
                 if (in.getFilePointer() >= end) {
-                  return false;
+                  return null;
                 }
-                ref.grow(bytesPerDoc);
-                in.readBytes(ref.bytes(), 0, bytesPerDoc);
-                ref.setLength(bytesPerDoc);
-                return true;
+                in.readBytes(scratch.bytes, 0, bytesPerDoc);
+                return scratch;
               }
             };
           }
         };
-      sorter.sort(tempInput.getName());
 
-      assert lastWriter[0] != null;
+      String name = sorter.sort(tempInput.getName());
 
-      return new OfflinePointWriter(tempDir, lastWriter[0], packedBytesLength, pointCount, longOrds, singleValuePerDoc);
+      return new OfflinePointWriter(tempDir, name, packedBytesLength, pointCount, longOrds, singleValuePerDoc);
     }
   }
 
@@ -983,7 +991,7 @@ public class BKDWriter implements Closeable {
     // and would mean leaving readers (IndexInputs) open for longer:
     if (writer instanceof OfflinePointWriter) {
       // We are reading from a temp file; go verify the checksum:
-      String tempFileName = ((OfflinePointWriter) writer).out.getName();
+      String tempFileName = ((OfflinePointWriter) writer).name;
       try (ChecksumIndexInput in = tempDir.openChecksumInput(tempFileName, IOContext.READONCE)) {
         CodecUtil.checkFooter(in, priorException);
       }

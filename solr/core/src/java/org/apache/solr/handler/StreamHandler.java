@@ -28,6 +28,7 @@ import java.util.Map.Entry;
 import org.apache.solr.client.solrj.io.SolrClientCache;
 import org.apache.solr.client.solrj.io.Tuple;
 import org.apache.solr.client.solrj.io.comp.StreamComparator;
+import org.apache.solr.client.solrj.io.graph.ShortestPathStream;
 import org.apache.solr.client.solrj.io.ops.ConcatOperation;
 import org.apache.solr.client.solrj.io.ops.DistinctOperation;
 import org.apache.solr.client.solrj.io.ops.GroupOperation;
@@ -94,8 +95,14 @@ public class StreamHandler extends RequestHandlerBase implements SolrCoreAware, 
     }
 
      streamFactory
-       // streams
+       // source streams
       .withFunctionName("search", CloudSolrStream.class)
+      .withFunctionName("facet", FacetStream.class)
+      .withFunctionName("update", UpdateStream.class)
+      .withFunctionName("jdbc", JDBCStream.class)
+      .withFunctionName("topic", TopicStream.class)
+      
+      // decorator streams
       .withFunctionName("merge", MergeStream.class)
       .withFunctionName("unique", UniqueStream.class)
       .withFunctionName("top", RankStream.class)
@@ -108,16 +115,16 @@ public class StreamHandler extends RequestHandlerBase implements SolrCoreAware, 
       .withFunctionName("leftOuterJoin", LeftOuterJoinStream.class) 
       .withFunctionName("hashJoin", HashJoinStream.class)
       .withFunctionName("outerHashJoin", OuterHashJoinStream.class)
-      .withFunctionName("facet", FacetStream.class)
-      .withFunctionName("update", UpdateStream.class)
-      .withFunctionName("jdbc", JDBCStream.class)
       .withFunctionName("intersect", IntersectStream.class)
       .withFunctionName("complement", ComplementStream.class)
-         .withFunctionName("daemon", DaemonStream.class)
-         .withFunctionName("topic", TopicStream.class)
+      .withFunctionName("daemon", DaemonStream.class)
+      .withFunctionName("sort", SortStream.class)
+      .withFunctionName("select", SelectStream.class)
+      
+      // graph streams
+      .withFunctionName("shortestPath", ShortestPathStream.class)
 
-
-    // metrics
+      // metrics
       .withFunctionName("min", MinMetric.class)
       .withFunctionName("max", MaxMetric.class)
       .withFunctionName("avg", MeanMetric.class)

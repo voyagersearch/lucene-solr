@@ -69,7 +69,7 @@ public class OfflineSorter {
   public final static int MAX_TEMPFILES = 10;
 
   private final Directory dir;
-
+  private final int valueLength;
   private final String tempFileNamePrefix;
 
   /** 
@@ -170,7 +170,7 @@ public class OfflineSorter {
   private final BufferSize ramBufferSize;
   
   private final Counter bufferBytesUsed = Counter.newCounter();
-  private final BytesRefArray buffer = new BytesRefArray(bufferBytesUsed);
+  private final SortableBytesRefArray buffer;
   SortInfo sortInfo;
   private int maxTempFiles;
   private final Comparator<BytesRef> comparator;
@@ -184,7 +184,7 @@ public class OfflineSorter {
    * @see BufferSize#automatic()
    */
   public OfflineSorter(Directory dir, String tempFileNamePrefix) throws IOException {
-    this(dir, tempFileNamePrefix, DEFAULT_COMPARATOR, BufferSize.automatic(), MAX_TEMPFILES);
+    this(dir, tempFileNamePrefix, DEFAULT_COMPARATOR, BufferSize.automatic(), MAX_TEMPFILES, -1);
   }
   
   /**
@@ -193,13 +193,14 @@ public class OfflineSorter {
    * @see BufferSize#automatic()
    */
   public OfflineSorter(Directory dir, String tempFileNamePrefix, Comparator<BytesRef> comparator) throws IOException {
-    this(dir, tempFileNamePrefix, comparator, BufferSize.automatic(), MAX_TEMPFILES);
+    this(dir, tempFileNamePrefix, comparator, BufferSize.automatic(), MAX_TEMPFILES, -1);
   }
 
   /**
-   * All-details constructor.
+   * All-details constructor.  If {@code valueLength} is -1 (the default), the length of each value differs; otherwise,
+   * all values have the specified length.
    */
-  public OfflineSorter(Directory dir, String tempFileNamePrefix, Comparator<BytesRef> comparator, BufferSize ramBufferSize, int maxTempfiles) {
+  public OfflineSorter(Directory dir, String tempFileNamePrefix, Comparator<BytesRef> comparator, BufferSize ramBufferSize, int maxTempfiles, int valueLength) {
     if (ramBufferSize.bytes < ABSOLUTE_MIN_SORT_BUFFER_SIZE) {
       throw new IllegalArgumentException(MIN_BUFFER_SIZE_MSG + ": " + ramBufferSize.bytes);
     }
@@ -207,7 +208,15 @@ public class OfflineSorter {
     if (maxTempfiles < 2) {
       throw new IllegalArgumentException("maxTempFiles must be >= 2");
     }
-
+    if (valueLength == -1) {
+      buffer = new BytesRefArray(bufferBytesUsed);
+    } else {
+      if (valueLength == 0 || valueLength > Short.MAX_VALUE) {
+        throw new IllegalArgumentException("valueLength must be 1 .. " + Short.MAX_VALUE + "; got: " + valueLength);
+      }
+      buffer = new FixedLengthBytesRefArray(valueLength);
+    }
+    this.valueLength = valueLength;
     this.ramBufferSize = ramBufferSize;
     this.maxTempFiles = maxTempfiles;
     this.comparator = comparator;
@@ -283,7 +292,7 @@ public class OfflineSorter {
       // We should be explicitly removing all intermediate files ourselves unless there is an exception:
       assert trackingDir.getCreatedFiles().size() == 1 && trackingDir.getCreatedFiles().contains(result);
 
-      sortInfo.totalTime = (System.currentTimeMillis() - sortInfo.totalTime); 
+      sortInfo.totalTime = System.currentTimeMillis() - sortInfo.totalTime; 
 
       CodecUtil.checkFooter(is.in);
 
@@ -308,7 +317,7 @@ public class OfflineSorter {
 
       long start = System.currentTimeMillis();
       BytesRefIterator iter = buffer.iterator(comparator);
-      sortInfo.sortTime += (System.currentTimeMillis() - start);
+      sortInfo.sortTime += System.currentTimeMillis() - start;
 
       while ((spare = iter.next()) != null) {
         assert spare.length <= Short.MAX_VALUE;
@@ -346,7 +355,7 @@ public class OfflineSorter {
     PriorityQueue<FileAndTop> queue = new PriorityQueue<FileAndTop>(segmentsToMerge.size()) {
       @Override
       protected boolean lessThan(FileAndTop a, FileAndTop b) {
-        return comparator.compare(a.current.get(), b.current.get()) < 0;
+        return comparator.compare(a.current, b.current) < 0;
       }
     };
 
@@ -361,15 +370,14 @@ public class OfflineSorter {
       // Open streams and read the top for each file
       for (int i = 0; i < segmentsToMerge.size(); i++) {
         streams[i] = getReader(dir.openChecksumInput(segmentsToMerge.get(i), IOContext.READONCE), segmentsToMerge.get(i));
-        BytesRefBuilder bytes = new BytesRefBuilder();
-        boolean result = false;
+        BytesRef item = null;
         try {
-          result = streams[i].read(bytes);
+          item = streams[i].next();
         } catch (Throwable t) {
           verifyChecksum(t, streams[i]);
         }
-        assert result;
-        queue.insertWithOverflow(new FileAndTop(i, bytes));
+        assert item != null;
+        queue.insertWithOverflow(new FileAndTop(i, item));
       }
   
       // Unix utility sort() uses ordered array of files to pick the next line from, updating
@@ -378,15 +386,14 @@ public class OfflineSorter {
       // so it shouldn't make much of a difference (didn't check).
       FileAndTop top;
       while ((top = queue.top()) != null) {
-        writer.write(top.current.bytes(), 0, top.current.length());
-        boolean result = false;
+        writer.write(top.current);
         try {
-          result = streams[top.fd].read(top.current);
+          top.current = streams[top.fd].next();
         } catch (Throwable t) {
           verifyChecksum(t, streams[top.fd]);
         }
 
-        if (result) {
+        if (top.current != null) {
           queue.updateTop();
         } else {
           queue.pop();
@@ -416,33 +423,48 @@ public class OfflineSorter {
   /** Read in a single partition of data */
   int readPartition(ByteSequencesReader reader) throws IOException {
     long start = System.currentTimeMillis();
-    final BytesRefBuilder scratch = new BytesRefBuilder();
-    while (true) {
-      boolean result = false;
-      try {
-        result = reader.read(scratch);
-      } catch (Throwable t) {
-        verifyChecksum(t, reader);
+    if (valueLength != -1) {
+      int limit = ramBufferSize.bytes / valueLength;
+      for(int i=0;i<limit;i++) {
+        BytesRef item = null;
+        try {
+          item = reader.next();
+        } catch (Throwable t) {
+          verifyChecksum(t, reader);
+        }
+        if (item == null) {
+          break;
+        }
+        buffer.append(item);
       }
-      if (result == false) {
-        break;
-      }
-      buffer.append(scratch.get());
-      // Account for the created objects.
-      // (buffer slots do not account to buffer size.) 
-      if (bufferBytesUsed.get() > ramBufferSize.bytes) {
-        break;
+    } else {
+      while (true) {
+        BytesRef item = null;
+        try {
+          item = reader.next();
+        } catch (Throwable t) {
+          verifyChecksum(t, reader);
+        }
+        if (item == null) {
+          break;
+        }
+        buffer.append(item);
+        // Account for the created objects.
+        // (buffer slots do not account to buffer size.) 
+        if (bufferBytesUsed.get() > ramBufferSize.bytes) {
+          break;
+        }
       }
     }
-    sortInfo.readTime += (System.currentTimeMillis() - start);
+    sortInfo.readTime += System.currentTimeMillis() - start;
     return buffer.size();
   }
 
   static class FileAndTop {
     final int fd;
-    final BytesRefBuilder current;
+    BytesRef current;
 
-    FileAndTop(int fd, BytesRefBuilder firstLine) {
+    FileAndTop(int fd, BytesRef firstLine) {
       this.fd = fd;
       this.current = firstLine;
     }
@@ -465,6 +487,8 @@ public class OfflineSorter {
    */
   public static class ByteSequencesWriter implements Closeable {
     protected final IndexOutput out;
+
+    // TODO: this should optimize the fixed width case as well
 
     /** Constructs a ByteSequencesWriter to the provided DataOutput */
     public ByteSequencesWriter(IndexOutput out) {
@@ -518,10 +542,11 @@ public class OfflineSorter {
    * Utility class to read length-prefixed byte[] entries from an input.
    * Complementary to {@link ByteSequencesWriter}.
    */
-  public static class ByteSequencesReader implements Closeable {
+  public static class ByteSequencesReader implements BytesRefIterator, Closeable {
     protected final String name;
     protected final ChecksumIndexInput in;
     protected final long end;
+    private final BytesRefBuilder ref = new BytesRefBuilder();
 
     /** Constructs a ByteSequencesReader from the provided IndexInput */
     public ByteSequencesReader(ChecksumIndexInput in, String name) {
@@ -538,16 +563,16 @@ public class OfflineSorter {
      * the header of the next sequence. Returns <code>true</code> otherwise.
      * @throws EOFException if the file ends before the full sequence is read.
      */
-    public boolean read(BytesRefBuilder ref) throws IOException {
+    public BytesRef next() throws IOException {
       if (in.getFilePointer() >= end) {
-        return false;
+        return null;
       }
 
       short length = in.readShort();
       ref.grow(length);
       ref.setLength(length);
       in.readBytes(ref.bytes(), 0, length);
-      return true;
+      return ref.get();
     }
 
     /**

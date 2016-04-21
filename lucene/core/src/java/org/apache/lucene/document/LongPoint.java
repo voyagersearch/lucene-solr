@@ -27,7 +27,8 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
 
 /** 
- * An indexed {@code long} field.
+ * An indexed {@code long} field for fast range filters.  If you also
+ * need to store the value, you should add a separate {@link StoredField} instance.
  * <p>
  * Finding all documents within an N-dimensional shape or range at search time is
  * efficient.  Multiple values for the same field in one document
@@ -81,10 +82,10 @@ public final class LongPoint extends Field {
 
   private static BytesRef pack(long... point) {
     if (point == null) {
-      throw new IllegalArgumentException("point cannot be null");
+      throw new IllegalArgumentException("point must not be null");
     }
     if (point.length == 0) {
-      throw new IllegalArgumentException("point cannot be 0 dimensions");
+      throw new IllegalArgumentException("point must not be 0 dimensions");
     }
     byte[] packed = new byte[point.length * Long.BYTES];
     

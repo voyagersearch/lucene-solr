@@ -428,22 +428,6 @@ public class HttpPartitionTest extends AbstractFullDistribZkTestBase {
     }
   }
 
-  private void createCollectionRetry(String testCollectionName, int numShards, int replicationFactor, int maxShardsPerNode)
-      throws SolrServerException, IOException {
-    CollectionAdminResponse resp = createCollection(testCollectionName, numShards, replicationFactor, maxShardsPerNode);
-    if (resp.getResponse().get("failure") != null) {
-      CollectionAdminRequest.Delete req = new CollectionAdminRequest.Delete();
-      req.setCollectionName(testCollectionName);
-      req.process(cloudClient);
-      
-      resp = createCollection(testCollectionName, numShards, replicationFactor, maxShardsPerNode);
-      
-      if (resp.getResponse().get("failure") != null) {
-        fail("Could not create " + testCollectionName);
-      }
-    }
-  }
-
   // test inspired by SOLR-6511
   protected void testLeaderZkSessionLoss() throws Exception {
 
@@ -588,7 +572,7 @@ public class HttpPartitionTest extends AbstractFullDistribZkTestBase {
   protected HttpSolrClient getHttpSolrClient(Replica replica, String coll) throws Exception {
     ZkCoreNodeProps zkProps = new ZkCoreNodeProps(replica);
     String url = zkProps.getBaseUrl() + "/" + coll;
-    return new HttpSolrClient(url);
+    return getHttpSolrClient(url);
   }
 
   protected int sendDoc(int docId) throws Exception {

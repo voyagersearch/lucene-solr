@@ -27,9 +27,8 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.util.AttributeSource;
 import org.apache.lucene.spatial.geopoint.document.GeoPointField;
 import org.apache.lucene.spatial.geopoint.document.GeoPointField.TermEncoding;
-import org.apache.lucene.spatial.util.GeoEncodingUtils;
 import org.apache.lucene.spatial.util.GeoRelationUtils;
-import org.apache.lucene.spatial.util.GeoUtils;
+import org.apache.lucene.geo.GeoUtils;
 import org.apache.lucene.util.SloppyMath;
 
 /**
@@ -44,6 +43,7 @@ abstract class GeoPointMultiTermQuery extends MultiTermQuery {
   protected final double minLat;
   protected final double maxLon;
   protected final double maxLat;
+
   protected final short maxShift;
   protected final TermEncoding termEncoding;
   protected final CellComparator cellComparator;
@@ -55,25 +55,15 @@ abstract class GeoPointMultiTermQuery extends MultiTermQuery {
   public GeoPointMultiTermQuery(String field, final TermEncoding termEncoding, final double minLat, final double maxLat, final double minLon, final double maxLon) {
     super(field);
 
-    if (GeoUtils.isValidLat(minLat) == false) {
-      throw new IllegalArgumentException("invalid minLat " + minLat);
-    }
-    if (GeoUtils.isValidLat(maxLat) == false) {
-      throw new IllegalArgumentException("invalid maxLat " + maxLat);
-    }
-    if (GeoUtils.isValidLon(minLon) == false) {
-      throw new IllegalArgumentException("invalid minLon " + minLon);
-    }
-    if (GeoUtils.isValidLon(maxLon) == false) {
-      throw new IllegalArgumentException("invalid maxLon " + maxLon);
-    }
+    GeoUtils.checkLatitude(minLat);
+    GeoUtils.checkLatitude(maxLat);
+    GeoUtils.checkLongitude(minLon);
+    GeoUtils.checkLongitude(maxLon);
 
-    final long minHash = GeoEncodingUtils.mortonHash(minLat, minLon);
-    final long maxHash = GeoEncodingUtils.mortonHash(maxLat, maxLon);
-    this.minLat = GeoEncodingUtils.mortonUnhashLat(minHash);
-    this.maxLat = GeoEncodingUtils.mortonUnhashLat(maxHash);
-    this.minLon = GeoEncodingUtils.mortonUnhashLon(minHash);
-    this.maxLon = GeoEncodingUtils.mortonUnhashLon(maxHash);
+    this.minLat = minLat;
+    this.maxLat = maxLat;
+    this.minLon = minLon;
+    this.maxLon = maxLon;
 
     this.maxShift = computeMaxShift();
     this.termEncoding = termEncoding;
