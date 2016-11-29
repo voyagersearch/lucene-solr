@@ -1,0 +1,47 @@
+ant clean-maven-build
+
+version=6.3.0-VG1
+mvn_repo=/Users/justin/Projects/voyager/var/mvn
+#mvn_repo=/Users/ryan/workspace/m2-repository
+
+mvn_opts="-Dmaven.repo.local=${mvn_repo}"
+
+# Replace the revision in:
+# dev-tools/maven/pom.xml.template:          <revisionOnScmFailure>NO-REVISION-AVAILABLE</revisionOnScmFailure>
+
+REV="$(git describe --always)"
+echo "${REV}"
+git checkout dev-tools/maven/pom.xml.template
+
+# hack for osx, check for "gsed" (ie gnu sed installed via homebrew)
+SED=sed
+gsed --version
+if [ "$?" == "0" ]; then
+  SED=gsed
+fi
+
+$SED -i.bak 's/NO-REVISION-AVAILABLE/'"${REV}"'/' dev-tools/maven/pom.xml.template 
+rm dev-tools/maven/pom.xml.template.bak
+
+rm -rf ${mvn_repo}/org/apache/solr
+rm -rf ${mvn_repo}/org/apache/lucene
+
+# now get the poms with out special version
+ant -Dversion=${version} get-maven-poms
+
+git checkout dev-tools/maven/pom.xml.template
+
+cd maven-build
+mvn ${mvn_opts} -DskipTests source:jar-no-fork install
+
+rm -rf ${mvn_repo}/org/apache/XXXX
+mkdir ${mvn_repo}/org/apache/XXXX
+mv ${mvn_repo}/org/apache/solr ${mvn_repo}/org/apache/XXXX
+mv ${mvn_repo}/org/apache/lucene ${mvn_repo}/org/apache/XXXX
+
+find ${mvn_repo}/org/apache/XXXX -name "maven-metadata-local.xml" -exec rm -rf {} \;
+find ${mvn_repo}/org/apache/XXXX -name "_maven.repositories" -exec rm -rf {} \;
+find ${mvn_repo}/org/apache/XXXX -name "_remote.repositories" -exec rm -rf {} \;
+
+open ${mvn_repo}/org/apache/XXXX
+du -hs ${mvn_repo}/org/apache/XXXX
