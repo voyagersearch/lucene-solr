@@ -168,7 +168,7 @@ public class HttpShardHandler extends ShardHandler {
         if (urls.size() <= 1) {
           String url = urls.get(0);
           srsp.setShardAddress(url);
-          try (SolrClient client = new Builder(url).withHttpClient(httpClient).build()) {
+          try (SolrClient client = makeSolrClient(url)) {
             ssr.nl = client.request(req);
           }
         } else {
@@ -206,7 +206,14 @@ public class HttpShardHandler extends ShardHandler {
       MDC.remove("ShardRequest.urlList");
     }
   }
-  
+
+  /**
+   * Subclass hook for creating solr client.
+   */
+  protected SolrClient makeSolrClient(String url) {
+    return new Builder(url).withHttpClient(httpClient).build();
+  }
+
   /**
    * Subclasses could modify the request based on the shard
    */
