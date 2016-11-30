@@ -138,8 +138,7 @@ public abstract class UpdateHandler implements SolrInfoMBean {
         }
 
       } else {
-        String className = ulogPluginInfo.className == null ? UpdateLog.class.getName() : ulogPluginInfo.className;
-        ulog = core.getResourceLoader().newInstance(className, UpdateLog.class);
+        ulog = createUpdateLog(core, ulogPluginInfo);
       }
 
       if (!core.isReloaded() && !core.getDirectoryFactory().isPersistent()) {
@@ -156,6 +155,14 @@ public abstract class UpdateHandler implements SolrInfoMBean {
     }
     // ulog.init() when reusing an existing log is deferred (currently at the end of the DUH2 constructor
 
+  }
+
+  /**
+   * Subclass hook for creating a new update log instance.
+   */
+  protected UpdateLog createUpdateLog(SolrCore core, PluginInfo ulogPluginInfo) {
+    String className = ulogPluginInfo.className == null ? UpdateLog.class.getName() : ulogPluginInfo.className;
+    return core.getResourceLoader().newInstance(className, UpdateLog.class);
   }
 
   /**
