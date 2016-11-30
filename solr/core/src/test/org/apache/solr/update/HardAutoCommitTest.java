@@ -48,6 +48,7 @@ public class HardAutoCommitTest extends AbstractSolrTestCase {
     clearIndex();
     // reload the core to clear stats
     h.getCoreContainer().reload(h.getCore().getName());
+    assertFalse(h.getCore().getSolrConfig().getUpdateHandlerInfo().commitWithinSoftCommit);
   }
 
 

@@ -22,6 +22,7 @@ import static org.apache.solr.update.processor.DistributingUpdateProcessorFactor
 import org.noggit.ObjectBuilder;
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.request.SolrQueryRequest;
+import org.apache.solr.schema.IndexSchema;
 import org.apache.solr.update.DirectUpdateHandler2;
 import org.apache.solr.update.UpdateLog;
 import org.apache.solr.update.UpdateHandler;
@@ -61,6 +62,12 @@ public class TestRecovery extends SolrTestCaseJ4 {
     savedFactory = System.getProperty("solr.DirectoryFactory");
     System.setProperty("solr.directoryFactory", "org.apache.solr.core.MockFSDirectoryFactory");
     initCore("solrconfig-tlog.xml","schema15.xml");
+    
+    // validate that the schema was not changed to an unexpected state
+    IndexSchema schema = h.getCore().getLatestSchema();
+    assertTrue(schema.getFieldOrNull("_version_").hasDocValues() && !schema.getFieldOrNull("_version_").indexed()
+        && !schema.getFieldOrNull("_version_").stored());
+
   }
   
   @AfterClass
@@ -113,7 +120,8 @@ public class TestRecovery extends SolrTestCaseJ4 {
       versions.addFirst(addAndGetVersion(sdoc("id", "A12"), null));
       versions.addFirst(deleteByQueryAndGetVersion("id:A11", null));
       versions.addFirst(addAndGetVersion(sdoc("id", "A13"), null));
-
+      versions.addFirst(addAndGetVersion(sdoc("id", "A12", "val_i_dvo", map("set", 1)), null)); // atomic update
+      versions.addFirst(addAndGetVersion(sdoc("id", "A12", "val_i_dvo", map("set", 2)), null)); // in-place update
       assertJQ(req("q","*:*"),"/response/numFound==0");
 
       assertJQ(req("qt","/get", "getVersions",""+versions.size()) ,"/versions==" + versions);
@@ -150,6 +158,7 @@ public class TestRecovery extends SolrTestCaseJ4 {
       assertU(adoc("id","A4"));
 
       assertJQ(req("q","*:*") ,"/response/numFound==3");
+      assertJQ(req("q","val_i_dvo:2") ,"/response/numFound==1"); // assert that in-place update is retained
 
       h.close();
       createCore();
@@ -169,6 +178,7 @@ public class TestRecovery extends SolrTestCaseJ4 {
       // h.getCore().getUpdateHandler().getUpdateLog().recoverFromLog();
 
       assertJQ(req("q","*:*") ,"/response/numFound==5");
+      assertJQ(req("q","val_i_dvo:2") ,"/response/numFound==1"); // assert that in-place update is retained
       Thread.sleep(100);
       assertEquals(permits, logReplay.availablePermits()); // no updates, so insure that recovery didn't run
 
