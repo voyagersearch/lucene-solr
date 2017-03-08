@@ -199,9 +199,14 @@ public class RecoveryStrategy extends Thread implements Closeable {
       ureq.setParams(new ModifiableSolrParams());
       ureq.getParams().set(DistributedUpdateProcessor.COMMIT_END_POINT, true);
       ureq.getParams().set(UpdateParams.OPEN_SEARCHER, false);
-      ureq.setAction(AbstractUpdateRequest.ACTION.COMMIT, false, true).process(
-          client);
+      ureq.setAction(AbstractUpdateRequest.ACTION.COMMIT, false, true);
+      commitOnLeader(client, ureq);
     }
+  }
+
+  protected void commitOnLeader(HttpSolrClient client, UpdateRequest ureq) throws SolrServerException,
+      IOException {
+    ureq.process(client);
   }
 
   @Override

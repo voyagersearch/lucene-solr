@@ -64,6 +64,8 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   private SolrIndexWriter indexWriter = null;
   private DirectoryFactory directoryFactory;
 
+  private RecoveryStrategyFactory recoveryStratFactory = new RecoveryStrategyFactory() {};
+
   private volatile RecoveryStrategy recoveryStrat;
 
   private volatile boolean lastReplicationSuccess = true;
@@ -310,7 +312,7 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
               recoveryThrottle.minimumWaitBetweenActions();
               recoveryThrottle.markAttemptingAction();
               
-              recoveryStrat = new RecoveryStrategy(cc, cd, DefaultSolrCoreState.this);
+              recoveryStrat = recoveryStratFactory.create(cc, cd, DefaultSolrCoreState.this);
               recoveryStrat.setRecoveringAfterStartup(recoveringAfterStartup);
               Future<?> future = cc.getUpdateShardHandler().getRecoveryExecutor().submit(recoveryStrat);
               try {
@@ -402,5 +404,15 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   @Override
   public Lock getRecoveryLock() {
     return recoveryLock;
+  }
+
+  public void setRecoveryStrategyFactory(RecoveryStrategyFactory factory) {
+    this.recoveryStratFactory = factory;
+  }
+
+  public interface RecoveryStrategyFactory {
+    default RecoveryStrategy create(CoreContainer cc, CoreDescriptor cd, DefaultSolrCoreState state) {
+      return new RecoveryStrategy(cc, cd, state);
+    }
   }
 }
