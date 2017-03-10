@@ -247,7 +247,7 @@ public class DistributedUpdateProcessor extends UpdateRequestProcessor {
     this.zkEnabled  = cc.isZooKeeperAware();
     zkController = cc.getZkController();
     if (zkEnabled) {
-      cmdDistrib = new SolrCmdDistributor(cc.getUpdateShardHandler());
+      cmdDistrib = createCommandDistributor(cc.getUpdateShardHandler());
     }
     //this.rsp = reqInfo != null ? reqInfo.getRsp() : null;
     cloudDesc = req.getCore().getCoreDescriptor().getCloudDescriptor();
@@ -273,6 +273,10 @@ public class DistributedUpdateProcessor extends UpdateRequestProcessor {
       nextInChain = nextInChain.next;
     }
     cloneRequiredOnLeader = shouldClone;
+  }
+
+  protected SolrCmdDistributor createCommandDistributor(UpdateShardHandler updateShardHandler) {
+    return new SolrCmdDistributor(updateShardHandler);
   }
 
   private List<Node> setupRequest(String id, SolrInputDocument doc) {
