@@ -255,10 +255,15 @@ public class RecoveryStrategy extends Thread implements Closeable {
 
   final private void commitOnLeader(String leaderUrl) throws SolrServerException,
       IOException {
+    commitOnLeader(leaderUrl, new ModifiableSolrParams());
+  }
+
+  protected void commitOnLeader(String leaderUrl, ModifiableSolrParams params) throws SolrServerException,
+      IOException {
     try (HttpSolrClient client = new HttpSolrClient.Builder(leaderUrl).build()) {
       client.setConnectionTimeout(30000);
       UpdateRequest ureq = new UpdateRequest();
-      ureq.setParams(new ModifiableSolrParams());
+      ureq.setParams(params);
       ureq.getParams().set(DistributedUpdateProcessor.COMMIT_END_POINT, true);
       ureq.getParams().set(UpdateParams.OPEN_SEARCHER, false);
       ureq.setAction(AbstractUpdateRequest.ACTION.COMMIT, false, true).process(
