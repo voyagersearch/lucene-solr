@@ -67,6 +67,7 @@ import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.response.transform.DocTransformer;
 import org.apache.solr.schema.FieldType;
 import org.apache.solr.schema.IndexSchema;
+import org.apache.solr.schema.NumericValueFieldType;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.search.DocList;
 import org.apache.solr.search.SolrDocumentFetcher;
@@ -404,7 +405,23 @@ public class RealTimeGetComponent extends SearchComponent
     } else { // i.e. lastPrevPointer==0
       assert lastPrevPointer == 0;
       // We have successfully resolved the document based off the tlogs
-      return toSolrDoc(partialDoc, core.getLatestSchema());
+
+      // determine whether we can use the in place document, if the caller specified onlyTheseFields
+      // and those fields are all numeric doc values, not indexed  or stored
+      IndexSchema schema = core.getLatestSchema();
+      boolean forInPlaceUpdate = onlyTheseFields != null;
+      if (forInPlaceUpdate) {
+        for (String f : onlyTheseFields) {
+          SchemaField field = schema.getField(f);
+          if (field == null || field.stored() || !field.hasDocValues() ||
+              !(field.getType() instanceof NumericValueFieldType)) {
+            forInPlaceUpdate = false;
+            break;
+          }
+        }
+      }
+
+      return toSolrDoc(partialDoc, schema, forInPlaceUpdate);
     }
   }
 
@@ -747,8 +764,20 @@ public class RealTimeGetComponent extends SearchComponent
    * @lucene.experimental
    */
   public static SolrDocument toSolrDoc(SolrInputDocument sdoc, IndexSchema schema) {
+    return toSolrDoc(sdoc, schema, false);
+  }
+
+  /**
+   * Converts a SolrInputDocument to SolrDocument, using an IndexSchema instance.
+   *
+   * @param sdoc The input document.
+   * @param schema The index schema.
+   * @param forInPlaceUpdate Whether the document is being used for an in place update,
+   *                         see {@link DocumentBuilder#toDocument(SolrInputDocument, IndexSchema, boolean)}
+   */
+  public static SolrDocument toSolrDoc(SolrInputDocument sdoc, IndexSchema schema, boolean forInPlaceUpdate) {
     // TODO: do something more performant than this double conversion
-    Document doc = DocumentBuilder.toDocument(sdoc, schema, false);
+    Document doc = DocumentBuilder.toDocument(sdoc, schema, forInPlaceUpdate);
 
     // copy the stored fields only
     Document out = new Document();
