@@ -274,12 +274,17 @@ public class RecoveryStrategy implements Runnable, Closeable {
 
   final private void commitOnLeader(String leaderUrl) throws SolrServerException,
       IOException {
-    try (HttpSolrClient client = new HttpSolrClient.Builder(leaderUrl)
-        .withConnectionTimeout(30000)
-        .withHttpClient(cc.getUpdateShardHandler().getRecoveryOnlyHttpClient())
-        .build()) {
+    commitOnLeader(leaderUrl, new ModifiableSolrParams());
+  }
+
+  protected void commitOnLeader(String leaderUrl, ModifiableSolrParams params) throws SolrServerException,
+      IOException {
+      try (HttpSolrClient client = new HttpSolrClient.Builder(leaderUrl)
+          .withConnectionTimeout(30000)
+          .withHttpClient(cc.getUpdateShardHandler().getRecoveryOnlyHttpClient())
+          .build()) {
       UpdateRequest ureq = new UpdateRequest();
-      ureq.setParams(new ModifiableSolrParams());
+      ureq.setParams(params);
       // ureq.getParams().set(DistributedUpdateProcessor.COMMIT_END_POINT, true);
       // ureq.getParams().set(UpdateParams.OPEN_SEARCHER, onlyLeaderIndexes);// Why do we need to open searcher if
       // "onlyLeaderIndexes"?
