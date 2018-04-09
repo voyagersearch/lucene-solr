@@ -1,6 +1,6 @@
 ant clean-maven-build
 
-version=6.6.2-VG1
+version=6.6.3-VG1
 mvn_repo=/Users/justin/Projects/voyager/var/mvn
 #mvn_repo=/Users/ryan/workspace/m2-repository
 
