@@ -25,12 +25,14 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.SortedMap;
@@ -42,6 +44,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterators;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.DelegatingAnalyzerWrapper;
 import org.apache.lucene.index.IndexableField;
@@ -652,31 +655,33 @@ public class IndexSchema {
 
     ArrayList<DynamicField> dFields = new ArrayList<>();
 
-    List<ConfigNode> nodes = n.children(null,  FIELD_KEYS);
-    ConfigNode child = n.child(FIELDS);
-    if(child != null) {
-      nodes.addAll(child.children(null, FIELD_KEYS));
+    Iterator<SchemaFieldInfo> fieldIter = readSchemaFields(n);
+    // Field Supplier, we introduce the SchemaInfoSupplier interface to be able to populate the index
+    // fields from the voyager DexField class
+    SchemaFieldInfo.Supplier supplier = null;
+    //String supperClass = schemaConf.get("/schema/supplier/@class", null);
+    String supperClass = Optional.ofNullable(n.child("supplier")).map(it -> it.attributes().get("class")).orElse(null);
+    if(supperClass!=null) {
+      log.info("Loading Fields From: "+supperClass);
+      supplier = loader.newInstance(supperClass, SchemaFieldInfo.Supplier.class);
+      fieldIter = Iterators.concat( fieldIter, supplier.getFields(this) );
     }
 
-    for (ConfigNode node : nodes) {
-      String name = DOMUtil.getAttr(node, NAME, "field definition");
+    while (fieldIter.hasNext()) {
+      SchemaFieldInfo fieldInfo = fieldIter.next();
+      String name = fieldInfo.name;
       log.trace("reading field def {}", name);
-      String type = DOMUtil.getAttr(node, TYPE, "field " + name);
 
+      String type = fieldInfo.type;
       FieldType ft = fieldTypes.get(type);
       if (ft == null) {
         throw new SolrException
             (ErrorCode.BAD_REQUEST, "Unknown " + FIELD_TYPE + " '" + type + "' specified on field " + name);
       }
 
-      Map<String, String> args = DOMUtil.toMapExcept(node, NAME, TYPE);
-      if (null != args.get(REQUIRED)) {
-        explicitRequiredProp.put(name, Boolean.valueOf(args.get(REQUIRED)));
-      }
+      SchemaField f = SchemaField.create(name, ft, fieldInfo.props);
 
-      SchemaField f = SchemaField.create(name, ft, args);
-
-      if (node.name().equals(FIELD)) {
+      if (!fieldInfo.dynamic) {
         SchemaField old = fields.put(f.getName(), f);
         if (old != null) {
           String msg = "[schema.xml] Duplicate field definition for '"
@@ -694,13 +699,10 @@ public class IndexSchema {
           log.debug("{} is required in this schema", name);
           requiredFields.add(f);
         }
-      } else if (node.name().equals(DYNAMIC_FIELD)) {
+      } else {
         if (isValidDynamicField(dFields, f)) {
           addDynamicFieldNoDupCheck(dFields, f);
         }
-      } else {
-        // we should never get here
-        throw new RuntimeException("Unknown field type");
       }
     }
 
@@ -711,7 +713,53 @@ public class IndexSchema {
 
     dynamicFields = dynamicFieldListToSortedArray(dFields);
 
+    if (supplier != null) supplier.postInit(this);
     return explicitRequiredProp;
+  }
+
+  private Iterator<SchemaFieldInfo> readSchemaFields(final ConfigNode n) {
+    List<ConfigNode> nodes = n.children(null,  FIELD_KEYS);
+    ConfigNode child = n.child(FIELDS);
+    if(child != null) {
+      nodes.addAll(child.children(null, FIELD_KEYS));
+    }
+
+    return new Iterator<SchemaFieldInfo>() {
+      int index = 0;
+
+      @Override
+      public boolean hasNext() {
+        return index<nodes.size();
+      }
+
+      @Override
+      public SchemaFieldInfo next() {
+        ConfigNode node = nodes.get(index++);
+        SchemaFieldInfo f = new SchemaFieldInfo();
+
+        f.name = DOMUtil.getAttr(node, NAME, "field definition");
+        log.trace("reading field def {}", name);
+
+        f.type = DOMUtil.getAttr(node, TYPE, "field " + name);
+        f.props = DOMUtil.toMapExcept(node, NAME, TYPE);
+
+        if (node.name().equals(FIELD)) {
+          // ok
+        }
+        else if (node.name().equals(DYNAMIC_FIELD)) {
+          f.dynamic = true;
+        }
+        else {
+          // we should never get here
+          throw new RuntimeException("Unknown field type");
+        }
+        return f;
+      }
+      @Override
+      public void remove() {
+        throw new UnsupportedOperationException();
+      }
+    };
   }
 
   /**
