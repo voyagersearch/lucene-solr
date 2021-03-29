@@ -85,6 +85,7 @@ import org.apache.solr.util.DataConfigNode;
 import org.apache.solr.util.circuitbreaker.CircuitBreakerManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.xml.sax.InputSource;
 
 import static org.apache.solr.common.params.CommonParams.NAME;
 import static org.apache.solr.common.params.CommonParams.PATH;
@@ -198,8 +199,13 @@ public class SolrConfig implements MapSerializable {
    * @param substitutableProperties optional properties to substitute into the XML
    */
   @SuppressWarnings("unchecked")
-  private SolrConfig(SolrResourceLoader loader, String name, boolean isConfigsetTrusted, Properties substitutableProperties)
-      throws IOException {
+  private SolrConfig(SolrResourceLoader loader, String name, boolean isConfigsetTrusted, Properties substitutableProperties) throws IOException {
+    this(loader, name, null, isConfigsetTrusted, substitutableProperties);
+  }
+
+  public SolrConfig(SolrResourceLoader loader, String name, InputSource is, boolean isConfigsetTrusted, Properties substitutableProperties)
+    throws IOException {
+    // insist we have non-null substituteProperties; it might get overlayed
     this.resourceLoader = loader;
     this.resourceName = name;
     this.substituteProperties = substitutableProperties;
@@ -217,13 +223,13 @@ public class SolrConfig implements MapSerializable {
             log.debug("LOADED_FROM_CACHE");
             root = cfg.data;
           } else {
-            readXml(loader, name, configCache, rp);
+            readXml(loader, name, is, configCache, rp);
           }
         }
       }
     }
     if(root == null) {
-      readXml(loader, name, configCache,new ResourceProvider(loader.openResource(name)) );
+      readXml(loader, name, is, configCache,new ResourceProvider(loader.openResource(name)) );
     }
     ConfigNode.SUBSTITUTES.set(key -> {
       if(substitutableProperties== null || !substitutableProperties.containsKey(key)) {
@@ -364,8 +370,8 @@ public class SolrConfig implements MapSerializable {
     }
   }
 
-  private void readXml(SolrResourceLoader loader, String name, Map<String, IndexSchemaFactory.VersionedConfig> configCache, ResourceProvider rp) throws IOException {
-    XmlConfigFile xml = new XmlConfigFile(loader,rp, name, null, "/config/", null);
+  private void readXml(SolrResourceLoader loader, String name, InputSource is, Map<String, IndexSchemaFactory.VersionedConfig> configCache, ResourceProvider rp) throws IOException {
+    XmlConfigFile xml = new XmlConfigFile(loader, rp, name, is, "/config/", null);
     root = new DataConfigNode(new DOMConfigNode(xml.getDocument().getDocumentElement()));
     this.znodeVersion = rp.zkVersion;
     if(configCache != null && rp.fileName !=null) {
