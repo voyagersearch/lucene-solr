@@ -83,6 +83,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 import static org.apache.solr.common.params.CommonParams.NAME;
@@ -171,8 +172,13 @@ public class SolrConfig extends XmlConfigFile implements MapSerializable {
    */
   private SolrConfig(SolrResourceLoader loader, String name, boolean isConfigsetTrusted, Properties substitutableProperties)
       throws ParserConfigurationException, IOException, SAXException {
+    this(loader, name, null, isConfigsetTrusted, substitutableProperties);
+  }
+
+  public SolrConfig(SolrResourceLoader loader, String name, InputSource is, boolean isConfigsetTrusted, Properties substitutableProperties)
+    throws ParserConfigurationException, IOException, SAXException {
     // insist we have non-null substituteProperties; it might get overlayed
-    super(loader, name, null, "/config/", substitutableProperties == null ? new Properties() : substitutableProperties);
+    super(loader, name, is, "/config/", substitutableProperties == null ? new Properties() : substitutableProperties);
     getOverlay();//just in case it is not initialized
     getRequestParams();
     initLibs(loader, isConfigsetTrusted);

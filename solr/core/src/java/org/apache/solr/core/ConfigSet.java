@@ -84,7 +84,7 @@ public class ConfigSet {
    * created the {@link SolrResourceLoader} associated with it is not associated with a core
    * So, we may not be able to update the core if we the schema classes are updated
    * */
-  interface SchemaSupplier {
+  public interface SchemaSupplier {
     IndexSchema get(boolean forceFetch);
 
   }
