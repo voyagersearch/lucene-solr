@@ -87,7 +87,7 @@ public class TransactionLog implements Closeable {
   List<String> globalStringList = new ArrayList<>();
 
   // write a BytesRef as a byte array
-  static final JavaBinCodec.ObjectResolver resolver = new JavaBinCodec.ObjectResolver() {
+  JavaBinCodec.ObjectResolver resolver = createResolver(new JavaBinCodec.ObjectResolver() {
     @Override
     public Object resolve(Object o, JavaBinCodec codec) throws IOException {
       if (o instanceof BytesRef) {
@@ -99,7 +99,14 @@ public class TransactionLog implements Closeable {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
               "TransactionLog doesn't know how to serialize " + o.getClass() + "; try implementing ObjectResolver?");
     }
-  };
+  });
+
+  /**
+   * Subclass hook to create it's own resolver.
+   */
+  protected JavaBinCodec.ObjectResolver createResolver(JavaBinCodec.ObjectResolver def) {
+    return def;
+  }
 
   public class LogCodec extends JavaBinCodec {
 
@@ -158,11 +165,11 @@ public class TransactionLog implements Closeable {
     }
   }
 
-  TransactionLog(File tlogFile, Collection<String> globalStrings) {
+  protected TransactionLog(File tlogFile, Collection<String> globalStrings) {
     this(tlogFile, globalStrings, false);
   }
 
-  TransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
+  protected TransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
     boolean success = false;
     try {
       if (debug) {
