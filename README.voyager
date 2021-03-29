@@ -1,0 +1,40 @@
+# Building Lucene/Solr for Voyager
+
+## Setup
+
+Apache Ant and Ivy are required to build Lucene/Solr. Once installed, there is a command to initialize Ivy:
+
+    ant ivy-bootstrap
+
+## Updating Version Suffix
+
+We append a patch number (VG1, VG2, etc...) to the base Solr number for Voyager builds. This is updated in `lucene/version.properties`.
+
+## Build Locally
+
+To create a local build and populate the local maven repository, run the command:
+
+    ant generate-maven-artifacts
+
+
+## Deploy Remotely
+
+To deploy remotely, first ensure that the credentials for the `voyager-upstream` repository are set in your `~/.m2/settings.xml`:
+
+    <settings>
+      <servers>
+        <server>
+          <id>voyager-upstream</id>
+          <username>voyager</username>
+          <password></password>     <!-- Get password from voyager repo -->
+        </server>
+        ...
+      </servers>
+    </settings>
+
+Then run ant again with some additional options:
+
+    ant -Dm2.repository.id=voyager-upstream -Dm2.repository.url=https://nexus.voyagerdev.com/repository/voyager-upstream generate-maven-artifacts
+
+
+
