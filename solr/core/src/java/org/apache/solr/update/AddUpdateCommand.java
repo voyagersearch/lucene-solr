@@ -136,7 +136,7 @@ public class AddUpdateCommand extends UpdateCommand {
      }
      final boolean forInPlaceUpdate = true;
      final boolean ignoreNestedDocs = false; // throw an exception if found
-     return DocumentBuilder.toDocument(solrDoc, req.getSchema(), forInPlaceUpdate, ignoreNestedDocs);
+     return toLuceneDocument(solrDoc, forInPlaceUpdate, ignoreNestedDocs);
    }
 
   /**
@@ -240,7 +240,7 @@ public class AddUpdateCommand extends UpdateCommand {
       // note if the doc is nested despite this, we'll throw an exception elsewhere
       final boolean forInPlaceUpdate = false;
       final boolean ignoreNestedDocs = false; // throw an exception if found
-      Document doc = DocumentBuilder.toDocument(solrDoc, req.getSchema(), forInPlaceUpdate, ignoreNestedDocs);
+      Document doc = toLuceneDocument(solrDoc, forInPlaceUpdate, ignoreNestedDocs);
       return Collections.singleton(doc);
     }
 
@@ -258,7 +258,11 @@ public class AddUpdateCommand extends UpdateCommand {
       // then we could add this field to the generated lucene document instead.
     }
 
-    return () -> all.stream().map(sdoc -> DocumentBuilder.toDocument(sdoc, req.getSchema())).iterator();
+    return () -> all.stream().map(sdoc -> toLuceneDocument(sdoc, false, true)).iterator();
+  }
+
+  protected Document toLuceneDocument(SolrInputDocument sdoc, boolean forInPlaceUpdate, boolean ignoreNestedDocs) {
+    return DocumentBuilder.toDocument(sdoc, req.getSchema(), forInPlaceUpdate, ignoreNestedDocs);
   }
 
   private void addRootField(SolrInputDocument sdoc, String rootId) {
