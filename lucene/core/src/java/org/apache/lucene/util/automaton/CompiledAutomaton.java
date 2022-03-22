@@ -233,9 +233,7 @@ public class CompiledAutomaton {
     if (this.finite) {
       commonSuffixRef = null;
     } else {
-      // NOTE: this is a very costly operation!  We should test if it's really warranted in practice... we could do a fast match
-      // by looking for a sink state (which means it has no common suffix).  Or maybe we shouldn't do it when simplify is false?:
-      BytesRef suffix = Operations.getCommonSuffixBytesRef(binary, maxDeterminizedStates);
+      BytesRef suffix = Operations.getCommonSuffixBytesRef(binary);
       if (suffix.length == 0) {
         commonSuffixRef = null;
       } else {

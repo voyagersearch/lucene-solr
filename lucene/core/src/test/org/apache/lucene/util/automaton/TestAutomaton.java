@@ -249,8 +249,8 @@ public class TestAutomaton extends LuceneTestCase {
     a.addTransition(init, fini, 'm');
     a.addTransition(fini, fini, 'm');
     a.finishState();
-    assertEquals(0, Operations.getCommonSuffixBytesRef(a,
-      DEFAULT_MAX_DETERMINIZED_STATES).length);
+    assertEquals(0, Operations.getCommonSuffixBytesRef(a).length);
+
   }
 
   public void testReverseRandom1() throws Exception {

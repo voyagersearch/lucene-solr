@@ -40,9 +40,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
+import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.IntsRef;
 import org.apache.lucene.util.IntsRefBuilder;
 import org.apache.lucene.util.RamUsageEstimator;
@@ -1048,28 +1050,60 @@ final public class Operations {
    * @return common prefix, which can be an empty (length 0) String (never null)
    */
   public static String getCommonPrefix(Automaton a) {
-    if (a.isDeterministic() == false) {
-      throw new IllegalArgumentException("input automaton must be deterministic");
+    if (hasDeadStatesFromInitial(a)) {
+      throw new IllegalArgumentException("input automaton has dead states");
     }
-    StringBuilder b = new StringBuilder();
-    HashSet<Integer> visited = new HashSet<>();
-    int s = 0;
-    boolean done;
-    Transition t = new Transition();
-    do {
-      done = true;
-      visited.add(s);
-      if (a.isAccept(s) == false && a.getNumTransitions(s) == 1) {
-        a.getTransition(s, 0, t);
-        if (t.min == t.max && !visited.contains(t.dest)) {
-          b.appendCodePoint(t.min);
-          s = t.dest;
-          done = false;
+    if (isEmpty(a)) {
+      return "";
+    }
+    StringBuilder builder = new StringBuilder();
+    Transition scratch = new Transition();
+    FixedBitSet visited = new FixedBitSet(a.getNumStates());
+    FixedBitSet current = new FixedBitSet(a.getNumStates());
+    FixedBitSet next = new FixedBitSet(a.getNumStates());
+    current.set(0); // start with initial state
+    algorithm:
+    while (true) {
+      // if we've already seen ALL these states before, we are done.
+      if (FixedBitSet.intersectionCount(visited, current) == current.cardinality()) {
+        break algorithm;
+      }
+      int label = -1;
+      // do a pass, stepping all current paths forward once
+      for (int state = current.nextSetBit(0);
+          state != DocIdSetIterator.NO_MORE_DOCS;
+          state = state + 1 >= current.length() ? DocIdSetIterator.NO_MORE_DOCS : current.nextSetBit(state + 1)) {
+        visited.set(state);
+        // if it is an accept state, we are done
+        if (a.isAccept(state)) {
+          break algorithm;
+        }
+        for (int transition = 0; transition < a.getNumTransitions(state); transition++) {
+          a.getTransition(state, transition, scratch);
+          if (label == -1) {
+            label = scratch.min;
+          }
+          // either a range of labels, or label that doesn't match all the other paths this round
+          if (scratch.min != scratch.max || scratch.min != label) {
+            break algorithm;
+          }
+          // mark target state for next iteration
+          next.set(scratch.dest);
         }
       }
-    } while (!done);
-
-    return b.toString();
+      // none of the states went anywhere (e.g. accept states), we are done
+      if (label == -1) {
+        break algorithm;
+      }
+      // add the label to the prefix
+      builder.appendCodePoint(label);
+      // swap "current" with "next", clear "next"
+      FixedBitSet tmp = current;
+      current = next;
+      next = tmp;
+      next.clear(0, next.length());
+    }
+    return builder.toString();
   }
   
   // TODO: this currently requites a determinized machine,
@@ -1082,23 +1116,15 @@ final public class Operations {
    * @return common prefix, which can be an empty (length 0) BytesRef (never null)
    */
   public static BytesRef getCommonPrefixBytesRef(Automaton a) {
+    String prefix = getCommonPrefix(a);
     BytesRefBuilder builder = new BytesRefBuilder();
-    HashSet<Integer> visited = new HashSet<>();
-    int s = 0;
-    boolean done;
-    Transition t = new Transition();
-    do {
-      done = true;
-      visited.add(s);
-      if (a.isAccept(s) == false && a.getNumTransitions(s) == 1) {
-        a.getTransition(s, 0, t);
-        if (t.min == t.max && !visited.contains(t.dest)) {
-          builder.append((byte) t.min);
-          s = t.dest;
-          done = false;
-        }
+    for (int i = 0; i < prefix.length(); i++) {
+      char ch = prefix.charAt(i);
+      if (ch > 255) {
+        throw new IllegalStateException("automaton is not binary");
       }
-    } while (!done);
+      builder.append((byte) ch);
+    }
 
     return builder.get();
   }
@@ -1137,14 +1163,11 @@ final public class Operations {
    * Returns the longest BytesRef that is a suffix of all accepted strings.
    * Worst case complexity: exponential in number of states (this calls
    * determinize).
-   * @param maxDeterminizedStates maximum number of states determinizing the
-   *  automaton can result in.  Set higher to allow more complex queries and
-   *  lower to prevent memory exhaustion.
    * @return common suffix, which can be an empty (length 0) BytesRef (never null)
    */
-  public static BytesRef getCommonSuffixBytesRef(Automaton a, int maxDeterminizedStates) {
+  public static BytesRef getCommonSuffixBytesRef(Automaton a) {
     // reverse the language of the automaton, then reverse its common prefix.
-    Automaton r = Operations.determinize(reverse(a), maxDeterminizedStates);
+    Automaton r = reverse(a);
     BytesRef ref = getCommonPrefixBytesRef(r);
     reverseBytes(ref);
     return ref;
