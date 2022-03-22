@@ -31,6 +31,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -177,6 +178,8 @@ public class CoreContainer {
 
   protected MetricsHandler metricsHandler;
 
+  private Set<Path> allowPaths;
+
   // Bits for the state variable.
   public final static long LOAD_COMPLETE = 0x1L;
   public final static long CORE_DISCOVERY_COMPLETE = 0x2L;
@@ -277,6 +280,21 @@ public class CoreContainer {
     this.coresLocator = locator;
     this.containerProperties = new Properties(properties);
     this.asyncSolrCoreLoad = asyncSolrCoreLoad;
+
+    this.allowPaths = new java.util.HashSet<>();
+    /* JD: removing initialization logic that depends on newer api
+    this.allowPaths.add(cfg.getSolrHome());
+    this.allowPaths.add(cfg.getCoreRootDirectory());
+    if (cfg.getSolrDataHome() != null) {
+      this.allowPaths.add(cfg.getSolrDataHome());
+    }
+    if (!cfg.getAllowPaths().isEmpty()) {
+      this.allowPaths.addAll(cfg.getAllowPaths());
+      if (log.isInfoEnabled()) {
+        log.info("Allowing use of paths: {}", cfg.getAllowPaths());
+      }
+    }
+     */
   }
 
   private synchronized void initializeAuthorizationPlugin(Map<String, Object> authorizationConf) {
@@ -978,7 +996,17 @@ public class CoreContainer {
       MDCLoggingContext.clear();
     }
   }
-  
+
+  /**
+   * Checks that the given path is relative to SOLR_HOME, SOLR_DATA_HOME, coreRootDirectory or one of the paths
+   * specified in solr.xml's allowPaths element. Delegates to {@link SolrPaths#assertPathAllowed(Path, Set)}
+   * @param pathToAssert path to check
+   * @throws SolrException if path is outside allowed paths
+   */
+  public void assertPathAllowed(Path pathToAssert) throws SolrException {
+    SolrPaths.assertPathAllowed(pathToAssert, allowPaths);
+  }
+
   /**
    * Take action when we failed to create a SolrCore. If error is due to corrupt index, try to recover. Various recovery
    * strategies can be specified via system properties "-DCoreInitFailedAction={fromleader, none}"
