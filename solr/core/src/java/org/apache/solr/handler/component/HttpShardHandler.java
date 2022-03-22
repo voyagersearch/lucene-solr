@@ -18,9 +18,12 @@ package org.apache.solr.handler.component;
 
 import java.lang.invoke.MethodHandles;
 import java.net.ConnectException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -31,6 +34,9 @@ import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.apache.http.client.HttpClient;
 import org.apache.solr.client.solrj.SolrClient;
@@ -297,6 +303,10 @@ public class HttpShardHandler extends ShardHandler {
       rb.slices = new String[rb.shards.length];
 
       if (zkController != null) {
+        // JD: check that the requested shards are known, this is a backport of some logic from later solr versions
+        // to prevent server request forgery
+        checkUrlsAllowList(zkController.getClusterState(), shards, lst);
+
         // figure out which shards are slices
         for (int i=0; i<rb.shards.length; i++) {
           if (rb.shards[i].indexOf('/') < 0) {
@@ -489,6 +499,76 @@ public class HttpShardHandler extends ShardHandler {
     return httpShardHandlerFactory;
   }
 
+  static void checkUrlsAllowList(
+      ClusterState clusterState,
+      String shardsParam,
+      List<String> urls) {
+    try {
+      checkAllowList(urls, clusterState);
+    } catch (MalformedURLException e) {
+      throw new SolrException(
+          SolrException.ErrorCode.BAD_REQUEST,
+          "Invalid URL syntax in '" + ShardParams.SHARDS + "' parameter: " + shardsParam,
+          e);
+    } catch (SolrException e) {
+      throw new SolrException(
+          SolrException.ErrorCode.FORBIDDEN,
+          "The '"
+              + ShardParams.SHARDS
+              + "' parameter value '"
+              + shardsParam
+              + "' contained value(s) not allowed: "
+              + e.getMessage()
+              + ". ");
+    }
+  }
 
+  static void checkAllowList(List<String> urls, ClusterState clusterState)
+      throws MalformedURLException {
+    Set<String> clusterHostAllowList =
+        clusterState == null ? Collections.emptySet() : getHostAllowList(clusterState);
+    for (String url : urls) {
+      String hostPort = parseHostPort(url);
+      if (!clusterHostAllowList.contains(hostPort)) {
+        throw new SolrException(
+            SolrException.ErrorCode.FORBIDDEN,
+            "URL "
+                + url
+                + " is not a live node of the cluster");
+      }
+    }
+  }
 
+  static Set<String> getHostAllowList(ClusterState clusterState) {
+    return clusterState.getLiveNodes().stream()
+        .map((liveNode) -> liveNode.substring(0, liveNode.indexOf('_')))
+        .collect(Collectors.toSet());
+  }
+
+  /**
+   * Regex pattern to match any protocol, e.g. http:// https:// s3://. After a match, regex group 1
+   * contains the protocol and group 2 the rest.
+   */
+  private static final Pattern PROTOCOL_PATTERN = Pattern.compile("(\\w+)(://.*)");
+
+  private static String parseHostPort(String url) throws MalformedURLException {
+    // Parse the host and port.
+    // It doesn't really matter which protocol we set here because we are not going to use it.
+    url = url.trim();
+    URL u;
+    Matcher protocolMatcher = PROTOCOL_PATTERN.matcher(url);
+    if (protocolMatcher.matches()) {
+      // Replace any protocol unsupported by URL.
+      if (!protocolMatcher.group(1).startsWith("http")) {
+        url = "http" + protocolMatcher.group(2);
+      }
+      u = new URL(url);
+    } else {
+      u = new URL("http://" + url);
+    }
+    if (u.getHost() == null || u.getPort() < 0) {
+      throw new MalformedURLException("Invalid host or port in '" + url + "'");
+    }
+    return u.getHost() + ":" + u.getPort();
+  }
 }
