@@ -35,6 +35,7 @@ ant -Dversion=${version} get-maven-poms
 git checkout dev-tools/maven/pom.xml.template
 
 cd maven-build
+mvn --version
 mvn ${mvn_opts} -DskipTests source:jar-no-fork install
 
 rm -rf ${mvn_repo}/org/apache/XXXX
