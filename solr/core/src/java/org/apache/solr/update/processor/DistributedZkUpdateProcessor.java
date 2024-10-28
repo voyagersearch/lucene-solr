@@ -106,11 +106,16 @@ public class DistributedZkUpdateProcessor extends DistributedUpdateProcessor {
 
   public DistributedZkUpdateProcessor(SolrQueryRequest req,
                                       SolrQueryResponse rsp, UpdateRequestProcessor next) {
+    this(req, rsp, new SolrCmdDistributor(req.getCore().getCoreContainer().getUpdateShardHandler()), next);
+  }
+
+  public DistributedZkUpdateProcessor(SolrQueryRequest req, SolrQueryResponse rsp,
+                                      SolrCmdDistributor cmdDistributor, UpdateRequestProcessor next) {
     super(req, rsp, next);
     CoreContainer cc = req.getCore().getCoreContainer();
     cloudDesc = req.getCore().getCoreDescriptor().getCloudDescriptor();
     zkController = cc.getZkController();
-    cmdDistrib = new SolrCmdDistributor(cc.getUpdateShardHandler());
+    cmdDistrib = cmdDistributor;
     cloneRequiredOnLeader = isCloneRequiredOnLeader(next);
     collection = cloudDesc.getCollectionName();
     clusterState = zkController.getClusterState();
@@ -120,7 +125,6 @@ public class DistributedZkUpdateProcessor extends DistributedUpdateProcessor {
       readOnlyCollection = coll.isReadOnly();
     }
   }
-
   private boolean isReadOnly() {
     return readOnlyCollection || req.getCore().readOnly;
   }
