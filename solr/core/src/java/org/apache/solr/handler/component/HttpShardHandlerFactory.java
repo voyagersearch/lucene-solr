@@ -318,7 +318,7 @@ public class HttpShardHandlerFactory extends ShardHandlerFactory implements org.
         .idleTimeout(soTimeout)
         .maxConnectionsPerHost(maxConnectionsPerHost).build();
     this.defaultClient.addListenerFactory(this.httpListenerFactory);
-    this.loadbalancer = new LBHttp2SolrClient(defaultClient);
+    this.loadbalancer = createLoadBalancer(defaultClient);
 
     initReplicaListTransformers(getParameter(args, "replicaRouting", null, sb));
 
@@ -357,6 +357,10 @@ public class HttpShardHandlerFactory extends ShardHandlerFactory implements org.
         }
       }
     }
+  }
+
+  protected LBHttp2SolrClient createLoadBalancer(Http2SolrClient defaultClient) {
+    return new LBHttp2SolrClient(defaultClient);
   }
 
   /**
