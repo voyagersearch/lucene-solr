@@ -451,7 +451,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
         if (currentIndexFetcher != null && currentIndexFetcher != pollingIndexFetcher) {
           currentIndexFetcher.destroy();
         }
-        currentIndexFetcher = new IndexFetcher(solrParams.toNamedList(), this, core);
+        currentIndexFetcher = createIndexFetcher(solrParams.toNamedList(), this, core);
       } else {
         currentIndexFetcher = pollingIndexFetcher;
       }
@@ -1286,7 +1286,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     NamedList follower = getObjectWithBackwardCompatibility(initArgs,  "follower",  "slave");
     boolean enableFollower = isEnabled( follower );
     if (enableFollower) {
-      currentIndexFetcher = pollingIndexFetcher = new IndexFetcher(follower, this, core);
+      currentIndexFetcher = pollingIndexFetcher = createIndexFetcher(follower, this, core);
       setupPolling((String) follower.get(POLL_INTERVAL));
       isFollower = true;
     }
@@ -1939,4 +1939,8 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
    * @lucene.internal
    */
   public static final String WAIT = "wait";
+
+  protected IndexFetcher createIndexFetcher(NamedList initArgs, ReplicationHandler handler, SolrCore sc) {
+    return new IndexFetcher(initArgs, handler, sc);
+  }
 }
