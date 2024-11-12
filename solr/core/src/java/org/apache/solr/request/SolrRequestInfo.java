@@ -42,7 +42,7 @@ public class SolrRequestInfo {
 
   private static final int MAX_STACK_SIZE = 10;
 
-  private static final ThreadLocal<Deque<SolrRequestInfo>> threadLocal = ThreadLocal.withInitial(LinkedList::new);
+  protected static final ThreadLocal<Deque<SolrRequestInfo>> threadLocal = ThreadLocal.withInitial(LinkedList::new);
 
   private int refCount = 1; // prevent closing when still used
 
